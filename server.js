@@ -123,12 +123,13 @@ app.put("/api/orders/:id", async (req, res) => {
 // ✅ Add New Order
 app.post("/api/orders", async (req, res) => {
     try {
+        
         await pool.query("BEGIN"); // ✅ Start transaction
         console.log("Received new order:", req.body);
 
         const query = `
-            INSERT INTO Orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, priority, start_time, current_status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`;
+            INSERT INTO Orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, priority, start_time, estimated_completion, current_status)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,$10) RETURNING *`;
 
         const values = [
             req.body.transaction_id,
@@ -139,13 +140,18 @@ app.post("/api/orders", async (req, res) => {
             req.body.category,
             "Standard",
             new Date(),
+            req.body.estimated_completion || "N/A",
+            //req.body.estimated_completion || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Default to 7 days from now
             req.body.current_status || "Pending"
         ];
 
         const newOrder = await pool.query(query, values);
         await pool.query("COMMIT"); // ✅ Ensure changes are saved
 
-        res.json(newOrder.rows[0]);
+        
+        console.log("✅ Inserted order:", newOrder.rows[0]);
+        return res.status(201).json(newOrder.rows[0]);
+
     } catch (err) {
         await pool.query("ROLLBACK"); // ✅ Roll back transaction if error occurs
         console.error("🚨 Backend Error Inserting Order:", err);
