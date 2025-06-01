@@ -4,7 +4,6 @@ const pool = require('./database'); // ✅ use existing pool✅ Using PostgreSQL
 
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
  
@@ -149,14 +148,19 @@ app.post("/api/orders", async (req, res) => {
         await pool.query("COMMIT"); // ✅ Ensure changes are saved
 
         
-        console.log("✅ Inserted order:", newOrder.rows[0]);
-        return res.status(201).json({
-                transaction_id: order.transaction_id,
-                customer_name: order.customer_name,
-                client_contact: order.client_contact,
-                paint_type: order.paint_type,
-                estimated_completion: order.estimated_completion
+        const insertedOrder = newOrder.rows[0];
+
+        console.log("✅ Inserted order:", insertedOrder);
+        console.log("📤 Sending back new order:", insertedOrder);
+
+        return  res.status(201).json({
+                transaction_id: insertedOrder.transaction_id,
+                customer_name: insertedOrder.customer_name,
+                client_contact: insertedOrder.client_contact,
+                paint_type: insertedOrder.paint_type,
+                estimated_completion: insertedOrder.estimated_completion
 });
+
 
     } catch (err) {
         await pool.query("ROLLBACK"); // ✅ Roll back transaction if error occurs
