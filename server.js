@@ -134,6 +134,10 @@ app.post("/api/orders", async (req, res) => {
         const query = `
             INSERT INTO Orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, priority, start_time, estimated_completion, current_status)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,$10) RETURNING *`;
+        
+            console.log("📦 Order Values:", values);
+
+        console.log("📦 Order Values:", req.body); // Log raw request body first
 
         const values = [
             req.body.transaction_id,
@@ -143,11 +147,13 @@ app.post("/api/orders", async (req, res) => {
             req.body.colour_code || "Pending",
             req.body.category,
             "Standard",
-            new Date(),
+            new Date().toISOString(),
             req.body.estimated_completion || "N/A",
-            //req.body.estimated_completion || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // Default to 7 days from now
             req.body.current_status || "Pending"
         ];
+
+        console.log("✅ Processed Values:", values); // Log formatted values
+
 
         const newOrder = await pool.query(query, values);
         await pool.query("COMMIT"); // ✅ Ensure changes are saved
