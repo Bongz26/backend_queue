@@ -1,20 +1,6 @@
-
-const { Pool } = require("pg");
-
-// ✅ Using PostgreSQL
-
-const pool = new Pool({
-    user: process.env.DB_USER,
-    host: process.env.DB_HOST,
-    database: process.env.DB_NAME,
-    password: process.env.DB_PASSWORD,
-    port: process.env.DB_PORT,
-    ssl: { rejectUnauthorized: process.env.DB_SSL === "true" }
-});
-
-
 const express = require('express');
 const cors = require('cors');
+const pool = require('./database'); // ✅ use existing pool✅ Using PostgreSQL
 
 
 const app = express();
@@ -166,7 +152,9 @@ app.post("/api/orders", async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
+app.get("/", (req, res) => {
+  res.send("🚀 Backend is alive!");
+});
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () =>
           console.log(`🚀 Server running on port ${PORT}`));
