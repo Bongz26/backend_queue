@@ -175,7 +175,7 @@ app.post("/api/orders", async (req, res) => {
     }
 });
 app.get("/", (req, res) => {
-  res.send("🚀 Backend is alive!");
+  res.send("🚀 Backend is alive! 🫠 ");
 });
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () =>
