@@ -150,7 +150,13 @@ app.post("/api/orders", async (req, res) => {
 
         
         console.log("✅ Inserted order:", newOrder.rows[0]);
-        return res.status(201).json(newOrder.rows[0]);
+        return res.status(201).json({
+                transaction_id: order.transaction_id,
+                customer_name: order.customer_name,
+                client_contact: order.client_contact,
+                paint_type: order.paint_type,
+                estimated_completion: order.estimated_completion
+});
 
     } catch (err) {
         await pool.query("ROLLBACK"); // ✅ Roll back transaction if error occurs
