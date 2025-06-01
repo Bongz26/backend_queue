@@ -13,6 +13,11 @@ app.use(cors({
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
+app.use((req, res, next) => {
+    res.setHeader("Content-Type", "application/json");
+    next();
+});
+
 // ✅ Fetch Orders
 app.get("/api/orders", async (req, res) => {
     try {
@@ -152,7 +157,8 @@ app.post("/api/orders", async (req, res) => {
 
         console.log("✅ Inserted order:", insertedOrder);
         console.log("📤 Sending back new order:", insertedOrder);
-
+        res.setHeader("Content-Type", "application/json");
+        
         return  res.status(201).json({
                 transaction_id: insertedOrder.transaction_id,
                 customer_name: insertedOrder.customer_name,
