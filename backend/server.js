@@ -29,7 +29,7 @@ app.use(cors({
 }));
 
 // ✅ Fetch Orders
-app.get("/orders", async (req, res) => {
+app.get("/api/orders", async (req, res) => {
     try {
         console.log("🛠 Attempting to query the latest orders...");
         await pool.query("DISCARD ALL"); // ✅ Clears connection cache before querying
@@ -50,7 +50,7 @@ app.get("/orders", async (req, res) => {
 });
 
 // ✅ Check for Duplicate Orders
-app.get("/check-duplicate", async (req, res) => {
+app.get("/api/check-duplicate", async (req, res) => {
     try {
         const { customer_name, client_contact, paint_type, category } = req.query;
         
@@ -67,7 +67,7 @@ app.get("/check-duplicate", async (req, res) => {
 });
 
 // ✅ Fetch Order Status
-app.get("/order-status/:trackID", async (req, res) => {
+app.get("/api/order-status/:trackID", async (req, res) => {
     try {
         console.log(`Checking order status for TrackID: ${req.params.trackID}`);
         
@@ -92,7 +92,7 @@ app.get("/order-status/:trackID", async (req, res) => {
 });
 
 // ✅ Fetch Active Orders Count
-app.get("/active-orders-count", async (req, res) => {
+app.get("/api/active-orders-count", async (req, res) => {
     try {
         console.log("🔍 Fetching active orders count...");
         const result = await pool.query("SELECT COUNT(*) AS activeOrders FROM Orders2 WHERE current_status IN ('Waiting', 'Mixing')");
@@ -105,7 +105,7 @@ app.get("/active-orders-count", async (req, res) => {
 });
 
 // ✅ Test Database Connection
-app.get("/test-db", async (req, res) => {
+app.get("/api/test-db", async (req, res) => {
     try {
         const result = await pool.query("SELECT * FROM Orders2 LIMIT 1");
         res.json(result.rows);
@@ -115,7 +115,7 @@ app.get("/test-db", async (req, res) => {
 });
 
 // ✅ Update Order Status
-app.put("/orders/:id", async (req, res) => {
+app.put("/api/orders/:id", async (req, res) => {
     try {
         const { current_status } = req.body;  
         const { id } = req.params;
@@ -135,7 +135,7 @@ app.put("/orders/:id", async (req, res) => {
 });
 
 // ✅ Add New Order
-app.post("/orders", async (req, res) => {
+app.post("/api/orders", async (req, res) => {
     try {
         await pool.query("BEGIN"); // ✅ Start transaction
         console.log("Received new order:", req.body);
@@ -169,6 +169,4 @@ app.post("/orders", async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () =>
-          console.log(`🚀 Server running on port ${PORT}`
-
-));
+          console.log(`🚀 Server running on port ${PORT}`));
