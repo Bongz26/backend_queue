@@ -1,4 +1,4 @@
-require('dotenv').config();
+
 const { Pool } = require("pg");
 
 // ✅ Using PostgreSQL
@@ -167,6 +167,6 @@ app.post("/api/orders", async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () =>
           console.log(`🚀 Server running on port ${PORT}`));
