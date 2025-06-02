@@ -127,59 +127,63 @@ app.put("/api/orders/:id", async (req, res) => {
 // ✅ Add New Order
 app.post("/api/orders", async (req, res) => {
     try {
-        
         await pool.query("BEGIN"); // ✅ Start transaction
-        console.log("Received new order:", req.body);
 
-        const query = `
-            INSERT INTO Orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, priority, start_time, estimated_completion, current_status)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,$10) RETURNING *`;
-        
-            console.log("📦 Order Values:", values);
+        console.log("📥 Received new order:", req.body); // Log raw body
 
-        console.log("📦 Order Values:", req.body); // Log raw request body first
+        // ✅ 1. Validate required fields immediately
+        const { transaction_id, customer_name, client_contact, paint_type, colour_code, category } = req.body;
 
+        if (!transaction_id || !customer_name || !client_contact || !paint_type || !category) {
+            console.warn("🚨 Missing required fields in request body");
+            return res.status(400).json({ error: "Missing required fields" });
+        }
+
+        // ✅ 2. Prepare values safely
         const values = [
-            req.body.transaction_id,
-            req.body.customer_name,
-            req.body.client_contact,
-            req.body.paint_type,
-            req.body.colour_code || "Pending",
-            req.body.category,
+            transaction_id,
+            customer_name,
+            client_contact,
+            paint_type,
+            colour_code || "Pending",
+            category,
             "Standard",
             new Date().toISOString(),
             req.body.estimated_completion || "N/A",
             req.body.current_status || "Pending"
         ];
 
-        console.log("✅ Processed Values:", values); // Log formatted values
+        console.log("✅ Processed Values:", values); // ✅ AFTER defining `values`
 
+        const query = `
+            INSERT INTO Orders2 (
+                transaction_id, customer_name, client_contact, 
+                paint_type, colour_code, category, priority, 
+                start_time, estimated_completion, current_status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`;
 
         const newOrder = await pool.query(query, values);
-        await pool.query("COMMIT"); // ✅ Ensure changes are saved
+        await pool.query("COMMIT");
 
-        
         const insertedOrder = newOrder.rows[0];
 
         console.log("✅ Inserted order:", insertedOrder);
-        console.log("📤 Sending back new order:", insertedOrder);
-        res.setHeader("Content-Type", "application/json");
-        
-        return  res.status(201).json({
-                transaction_id: insertedOrder.transaction_id,
-                customer_name: insertedOrder.customer_name,
-                client_contact: insertedOrder.client_contact,
-                paint_type: insertedOrder.paint_type,
-                estimated_completion: insertedOrder.estimated_completion
-});
-
+        res.status(201).json({
+            transaction_id: insertedOrder.transaction_id,
+            customer_name: insertedOrder.customer_name,
+            client_contact: insertedOrder.client_contact,
+            paint_type: insertedOrder.paint_type,
+            estimated_completion: insertedOrder.estimated_completion
+        });
 
     } catch (err) {
-        await pool.query("ROLLBACK"); // ✅ Roll back transaction if error occurs
-        console.error("🚨 Backend Error Inserting Order:", err);
+        await pool.query("ROLLBACK");
+        console.error("🚨 Backend Error Inserting Order:", err.message, err.stack);
         res.status(500).json({ error: err.message });
     }
 });
+
 app.get("/", (req, res) => {
   res.send("🚀 Backend is alive! 🫠 ");
 });
