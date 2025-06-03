@@ -148,9 +148,10 @@ app.post("/api/orders", async (req, res) => {
             colour_code || "Pending",
             category,
             "Standard",
-            new Date().toISOString(),
-            req.body.estimated_completion || "N/A",
+            new Date().toLocaleString("en-GB", { timeZone: "Africa/Johannesburg", hour12: false }), // ✅ Adjusted to UTC+2
+            req.body.estimated_completion.replace("T", " ").split(".")[0], // ✅ Ensure proper format before storing
             req.body.current_status || "Pending"
+
         ];
 
         console.log("✅ Processed Values:", values); // ✅ AFTER defining `values`
