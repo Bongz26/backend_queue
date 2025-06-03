@@ -131,6 +131,9 @@ app.post("/api/orders", async (req, res) => {
 
         console.log("📥 Received new order:", req.body); // Log raw body
 
+        // ✅ Extract estimated_completion properly before using it
+        const estimatedCompletionFormatted = req.body.estimated_completion.replace("T", " ").split(".")[0];
+
         // ✅ 1. Validate required fields immediately
         const { transaction_id, customer_name, client_contact, paint_type, colour_code, category } = req.body;
 
