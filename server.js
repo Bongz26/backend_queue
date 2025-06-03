@@ -85,7 +85,7 @@ app.get("/api/order-status/:trackID", async (req, res) => {
 app.get("/api/active-orders-count", async (req, res) => {
     try {
         console.log("🔍 Fetching active orders count...");
-        const result = await pool.query("SELECT COUNT(*) AS activeOrders FROM Orders2 WHERE current_status IN ('Waiting', 'Mixing')");
+        const result = await pool.query("SELECT COUNT(*) AS activeOrders FROM Orders2 WHERE current_status NOT IN ('Ready')");
         
         res.json({ activeOrders: result.rows[0].activeorders });
     } catch (err) {
