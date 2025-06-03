@@ -149,8 +149,9 @@ app.post("/api/orders", async (req, res) => {
             category,
             "Standard",
             new Date().toLocaleString("en-GB", { timeZone: "Africa/Johannesburg", hour12: false }), // ✅ Adjusted to UTC+2
-            req.body.estimated_completion.replace("T", " ").split(".")[0], // ✅ Ensure proper format before storing
-            req.body.current_status || "Pending"
+    estimatedCompletionFormatted, // ✅ Now storing correctly formatted ETC
+    req.body.current_status || "Pending"
+
 
         ];
 
