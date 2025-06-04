@@ -24,7 +24,7 @@ app.get("/api/orders", async (req, res) => {
         console.log("🛠 Attempting to query the latest orders...");
         await pool.query("DISCARD ALL"); // ✅ Clears connection cache before querying
 
-        const result = await pool.query("SELECT * FROM Orders2 ORDER BY start_time DESC LIMIT 10");
+        const result = await pool.query("SELECT * FROM Orders2 WHERE current_status != 'Ready' ORDER BY current_status DESC LIMIT 10");
 
         if (!result || !result.rows || result.rows.length === 0) {
             console.warn("⚠️ No orders found in the database.");
