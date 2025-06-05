@@ -16,7 +16,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// ✅ Fetch Orders including assigned employees & `start_time`
+// ✅ Fetch Orders (Including "Mixing" Orders)
 app.get("/api/orders", async (req, res) => {
     try {
         console.log("🛠 Fetching latest orders...");
@@ -26,7 +26,7 @@ app.get("/api/orders", async (req, res) => {
             SELECT transaction_id, customer_name, client_contact, assigned_employee, 
                    current_status, colour_code, paint_type, start_time, paint_quantity, order_type, category
             FROM Orders2 
-            WHERE current_status != 'Ready' 
+            WHERE current_status NOT IN ('Ready') 
             ORDER BY current_status DESC 
             LIMIT 20
         `);
@@ -39,13 +39,11 @@ app.get("/api/orders", async (req, res) => {
     }
 });
 
-// ✅ Add New Order (Handling Walk-in and Phone Orders)
+// ✅ Add New Order
 app.post("/api/orders", async (req, res) => {
     try {
         const { transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type } = req.body;
-
-        // ✅ Ensure `start_time` is properly set (UTC format)
-        const start_time = new Date().toISOString();
+        const start_time = new Date().toISOString(); // ✅ Store accurate time
 
         console.log("🛠 Adding new order:", req.body);
 
@@ -68,17 +66,17 @@ app.put("/api/orders/:id", async (req, res) => {
         const { current_status, assigned_employee, colour_code } = req.body;
         const { id } = req.params;
 
-        console.log("🛠 Incoming update request:", { id, current_status, assigned_employee, colour_code });
+        console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
 
         await pool.query(
             "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
             [current_status, assigned_employee || null, colour_code || "Pending", id]
         );
 
-        console.log("✅ Order updated successfully in DB!");
-        res.json({ message: "✅ Order status updated successfully!" });
+        console.log("✅ Order updated successfully!");
+        res.json({ message: "✅ Order status updated!" });
     } catch (error) {
-        console.error("🚨 Error updating order status:", error);
+        console.error("🚨 Error updating order:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -100,31 +98,6 @@ app.get("/api/employees", async (req, res) => {
         res.json({ employee_name: result.rows[0].employee_name });
     } catch (error) {
         console.error("🚨 Error fetching employee:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ✅ Add Colour Code when status is "Ready"
-app.put("/api/orders/update-colour/:id", async (req, res) => {
-    try {
-        const { new_colour_code } = req.body;
-        const { id } = req.params;
-
-        console.log("🎨 Updating Colour Code for Order:", id, "New Colour Code:", new_colour_code);
-
-        if (!new_colour_code) {
-            return res.status(400).json({ error: "❌ Colour Code is required!" });
-        }
-
-        await pool.query(
-            "UPDATE Orders2 SET colour_code = $1 WHERE transaction_id = $2",
-            [new_colour_code, id]
-        );
-
-        console.log("✅ Colour Code updated successfully!");
-        res.json({ message: "✅ Colour Code updated successfully!" });
-    } catch (error) {
-        console.error("🚨 Error updating colour code:", error);
         res.status(500).json({ error: error.message });
     }
 });
