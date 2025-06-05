@@ -30,6 +30,7 @@ app.get("/api/orders", async (req, res) => {
             ORDER BY current_status DESC 
             LIMIT 20
         `);
+        console.log(`🛠 Updating order: ${id} → ${current_status}`);
 
         console.log("✅ Orders fetched successfully:", result.rows);
         res.json(result.rows);
