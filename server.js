@@ -70,7 +70,7 @@ app.put("/api/orders/:id", async (req, res) => {
 
         await pool.query(
             "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
-            [current_status, assigned_employee || null, colour_code || "Pending", id]
+            [current_status, assigned_employee, colour_code || "Pending", id]
         );
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
