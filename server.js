@@ -39,6 +39,19 @@ app.get("/api/orders", async (req, res) => {
     }
 });
 
+app.get("/api/orders/active", async (req, res) => {
+    try {
+        const result = await pool.query(
+            "SELECT * FROM Orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending') AND ready = false"
+        );
+        
+        res.json(result.rows);
+    } catch (error) {
+        console.error("🚨 Error fetching active orders:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ✅ Add New Order
 app.post("/api/orders", async (req, res) => {
     try {
