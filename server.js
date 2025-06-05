@@ -24,7 +24,7 @@ app.get("/api/orders", async (req, res) => {
 
         const result = await pool.query(`
             SELECT transaction_id, customer_name, client_contact, assigned_employee, 
-                   current_status, colour_code, paint_type, start_time
+                   current_status, colour_code, paint_type, start_time, paint_quantity, order_type
             FROM Orders2 
             WHERE current_status != 'Ready' 
             ORDER BY current_status DESC 
@@ -49,6 +49,26 @@ app.get("/api/active-orders-count", async (req, res) => {
     } catch (err) {
         console.error("🚨 Error fetching active orders count:", err);
         res.status(500).json({ error: err.message });
+    }
+});
+
+// ✅ Add New Order
+app.post("/api/orders", async (req, res) => {
+    try {
+        const { transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type } = req.body;
+
+        console.log("🛠 Adding new order:", req.body);
+
+        await pool.query(
+            "INSERT INTO Orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            [transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type]
+        );
+
+        console.log("✅ Order added successfully!");
+        res.json({ message: "✅ Order added successfully!" });
+    } catch (error) {
+        console.error("🚨 Error adding order:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -120,7 +140,7 @@ app.put("/api/orders/update-colour/:id", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-    res.send("🚀 Backend is alive after it froze :( !");
+    res.send("🚀 Backend is alive!");
 });
 
 const PORT = process.env.PORT || 10000;
