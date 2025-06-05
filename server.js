@@ -42,7 +42,7 @@ app.get("/api/orders", async (req, res) => {
 app.get("/api/orders/active", async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT * FROM Orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending') AND ready = false"
+            "SELECT * FROM Orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending')"
         );
         
         res.json(result.rows);
