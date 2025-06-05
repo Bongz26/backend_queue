@@ -1,89 +1,127 @@
 const express = require("express");
 const cors = require("cors");
-const pool = require("./database"); // PostgreSQL Pool
+const pool = require("./database"); // ✅ PostgreSQL connection
 
 const app = express();
-app.use(express.json()); // Enable JSON parsing
+app.use(express.json());
 
-// ✅ CORS Configuration
 app.use(cors({
     origin: "*",
     methods: ["GET", "POST", "PUT"],
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-// ✅ Fetch All Orders
+app.use((req, res, next) => {
+    res.setHeader("Content-Type", "application/json");
+    next();
+});
+
+// ✅ Fetch Orders including assigned employees
 app.get("/api/orders", async (req, res) => {
     try {
         console.log("🛠 Fetching latest orders...");
-        const result = await pool.query("SELECT * FROM Order2 ORDER BY start_time DESC LIMIT 10");
+        await pool.query("DISCARD ALL"); // ✅ Clears connection cache before querying
 
-        if (!result.rows.length) {
-            return res.status(404).json({ message: "No orders found" });
-        }
+        const result = await pool.query(`
+            SELECT transaction_id, customer_name, client_contact, assigned_employee, 
+                   current_status, colour_code, paint_type, start_time
+            FROM Orders2 
+            WHERE current_status != 'Ready' 
+            ORDER BY current_status DESC 
+            LIMIT 10
+        `);
 
+        console.log("✅ Orders fetched successfully:", result.rows);
         res.json(result.rows);
     } catch (err) {
+        console.error("🚨 Error fetching orders:", err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// ✅ Add a New Order (Fixed Timestamp Issue)
-app.post("/api/orders", async (req, res) => {
+// ✅ Fetch Active Orders Count
+app.get("/api/active-orders-count", async (req, res) => {
     try {
-        await pool.query("BEGIN");
+        console.log("🔍 Fetching active orders count...");
+        const result = await pool.query("SELECT COUNT(*) AS activeOrders FROM Orders2 WHERE current_status NOT IN ('Ready')");
 
-        const { transaction_id, client_name, client_contact, paint_type, color_code, category, priority, start_time, estimated_completion, current_status } = req.body;
+        res.json({ activeOrders: result.rows[0].activeorders });
+    } catch (err) {
+        console.error("🚨 Error fetching active orders count:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
 
-        // ✅ Validate Required Fields
-        if (!transaction_id || !client_name || !client_contact || !paint_type || !category || !priority) {
-            return res.status(400).json({ error: "Missing required fields" });
+// ✅ Update Order Status, ensuring assigned_employee is updated
+app.put("/api/orders/:id", async (req, res) => {
+    try {
+        const { current_status, assigned_employee, colour_code } = req.body;
+        const { id } = req.params;
+
+        console.log("🛠 Incoming update request:", { id, current_status, assigned_employee, colour_code });
+
+        await pool.query(
+            "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
+            [current_status, assigned_employee || null, colour_code || "Pending", id]
+        );
+
+        console.log("✅ Order updated successfully in DB!");
+        res.json({ message: "✅ Order status updated successfully!" });
+    } catch (error) {
+        console.error("🚨 Error updating order status:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ✅ Verify Employee Code
+app.get("/api/employees", async (req, res) => {
+    try {
+        const { code } = req.query;
+        console.log("🔍 Searching for Employee Code:", code);
+
+        const result = await pool.query("SELECT employee_name FROM employees WHERE TRIM(employee_code) = TRIM($1)", [code]);
+
+        if (result.rows.length === 0) {
+            console.warn("❌ Invalid Employee Code!");
+            return res.status(404).json({ error: "Invalid Employee Code" });
         }
 
-        // ✅ Ensure Estimated Completion is a Timestamp
-        const formattedETC = new Date(start_time);
-        formattedETC.setMinutes(formattedETC.getMinutes() + 40); // Adjust mixing time
-
-        const values = [
-            transaction_id,
-            client_name,
-            client_contact,
-            paint_type,
-            color_code || "Pending",
-            category,
-            priority || "Standard",
-            start_time || new Date().toISOString(),
-            formattedETC.toISOString(), // ✅ Fixed timestamp format
-            current_status || "Pending"
-        ];
-
-        const query = `
-            INSERT INTO Order2 (
-                transaction_id, client_name, client_contact,
-                paint_type, color_code, category, priority,
-                start_time, estimated_completion, current_status
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`;
-
-        const newOrder = await pool.query(query, values);
-        await pool.query("COMMIT");
-
-        console.log("✅ Inserted Order:", newOrder.rows[0]); // ✅ Debug Log
-
-        res.status(201).json(newOrder.rows[0]); // ✅ Return inserted order
-
-    } catch (err) {
-        await pool.query("ROLLBACK");
-        console.error("🚨 Order Insertion Failed:", err.message);
-        res.status(500).json({ error: err.message });
+        console.log("✅ Employee found:", result.rows[0].employee_name);
+        res.json({ employee_name: result.rows[0].employee_name });
+    } catch (error) {
+        console.error("🚨 Error fetching employee:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ✅ Health Check Endpoint
-app.get("/health", (req, res) => {
-    res.send("🚀 Backend is alive mchana!!");
+// ✅ Add Colour Code when status is "Ready"
+app.put("/api/orders/update-colour/:id", async (req, res) => {
+    try {
+        const { new_colour_code } = req.body;
+        const { id } = req.params;
+
+        console.log("🎨 Updating Colour Code for Order:", id, "New Colour Code:", new_colour_code);
+
+        if (!new_colour_code) {
+            return res.status(400).json({ error: "❌ Colour Code is required!" });
+        }
+
+        await pool.query(
+            "UPDATE Orders2 SET colour_code = $1 WHERE transaction_id = $2",
+            [new_colour_code, id]
+        );
+
+        console.log("✅ Colour Code updated successfully!");
+        res.json({ message: "✅ Colour Code updated successfully!" });
+    } catch (error) {
+        console.error("🚨 Error updating colour code:", error);
+        res.status(500).json({ error: error.message });
+    }
 });
 
-// ✅ Start Server
+app.get("/", (req, res) => {
+    res.send("🚀 Backend is alive after it froze :( !");
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
