@@ -1,88 +1,89 @@
 const express = require("express");
 const cors = require("cors");
-const pool = require("./database"); // ✅ Using PostgreSQL
+const pool = require("./database"); // PostgreSQL Pool
 
 const app = express();
-app.use(express.json());
+app.use(express.json()); // Enable JSON parsing
 
+// ✅ CORS Configuration
 app.use(cors({
     origin: "*",
     methods: ["GET", "POST", "PUT"],
     allowedHeaders: ["Content-Type", "Authorization"]
 }));
 
-app.use((req, res, next) => {
-    res.setHeader("Content-Type", "application/json");
-    next();
-});
-
-// ✅ Fetch Orders with assigned employees included
+// ✅ Fetch All Orders
 app.get("/api/orders", async (req, res) => {
     try {
         console.log("🛠 Fetching latest orders...");
-        await pool.query("DISCARD ALL"); // ✅ Clears connection cache before querying
+        const result = await pool.query("SELECT * FROM Order2 ORDER BY start_time DESC LIMIT 10");
 
-        const result = await pool.query(`
-            SELECT transaction_id, customer_name, assigned_employee, current_status, colour_code
-            FROM Orders2 
-            WHERE current_status != 'Ready' 
-            ORDER BY current_status DESC 
-            LIMIT 10
-        `);
+        if (!result.rows.length) {
+            return res.status(404).json({ message: "No orders found" });
+        }
 
-        console.log("✅ Orders fetched successfully:", result.rows);
         res.json(result.rows);
     } catch (err) {
-        console.error("🚨 Error fetching orders:", err);
         res.status(500).json({ error: err.message });
     }
 });
 
-// ✅ Update Order Status, ensuring assigned_employee is updated
-app.put("/api/orders/:id", async (req, res) => {
+// ✅ Add a New Order (Fixed Timestamp Issue)
+app.post("/api/orders", async (req, res) => {
     try {
-        const { current_status, assigned_employee, colour_code } = req.body;
-        const { id } = req.params;
+        await pool.query("BEGIN");
 
-        console.log("🛠 Incoming update request:", { current_status, assigned_employee, colour_code });
+        const { transaction_id, client_name, client_contact, paint_type, color_code, category, priority, start_time, estimated_completion, current_status } = req.body;
 
-        await pool.query(
-            "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
-            [current_status, assigned_employee || null, colour_code || "Pending", id]
-        );
-
-        console.log("✅ Order updated successfully in DB!");
-        res.json({ message: "✅ Order status updated successfully!" });
-    } catch (error) {
-        console.error("🚨 Error updating order status:", error);
-        res.status(500).json({ error: error.message });
-    }
-});
-
-// ✅ Verify Employee Code
-app.get("/api/employees", async (req, res) => {
-    try {
-        const { code } = req.query;
-        console.log("🔍 Searching for Employee Code:", code);
-
-        const result = await pool.query("SELECT employee_name FROM employees WHERE TRIM(employee_code) = TRIM($1)", [code]);
-
-        if (result.rows.length === 0) {
-            console.warn("❌ Invalid Employee Code!");
-            return res.status(404).json({ error: "Invalid Employee Code" });
+        // ✅ Validate Required Fields
+        if (!transaction_id || !client_name || !client_contact || !paint_type || !category || !priority) {
+            return res.status(400).json({ error: "Missing required fields" });
         }
 
-        console.log("✅ Employee found:", result.rows[0].employee_name);
-        res.json({ employee_name: result.rows[0].employee_name });
-    } catch (error) {
-        console.error("🚨 Error fetching employee:", error);
-        res.status(500).json({ error: error.message });
+        // ✅ Ensure Estimated Completion is a Timestamp
+        const formattedETC = new Date(start_time);
+        formattedETC.setMinutes(formattedETC.getMinutes() + 40); // Adjust mixing time
+
+        const values = [
+            transaction_id,
+            client_name,
+            client_contact,
+            paint_type,
+            color_code || "Pending",
+            category,
+            priority || "Standard",
+            start_time || new Date().toISOString(),
+            formattedETC.toISOString(), // ✅ Fixed timestamp format
+            current_status || "Pending"
+        ];
+
+        const query = `
+            INSERT INTO Order2 (
+                transaction_id, client_name, client_contact,
+                paint_type, color_code, category, priority,
+                start_time, estimated_completion, current_status
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`;
+
+        const newOrder = await pool.query(query, values);
+        await pool.query("COMMIT");
+
+        console.log("✅ Inserted Order:", newOrder.rows[0]); // ✅ Debug Log
+
+        res.status(201).json(newOrder.rows[0]); // ✅ Return inserted order
+
+    } catch (err) {
+        await pool.query("ROLLBACK");
+        console.error("🚨 Order Insertion Failed:", err.message);
+        res.status(500).json({ error: err.message });
     }
 });
 
-app.get("/", (req, res) => {
-    res.send("🚀 Backend is alive!");
+// ✅ Health Check Endpoint
+app.get("/health", (req, res) => {
+    res.send("🚀 Backend is alive mchana!!");
 });
 
-const PORT = process.env.PORT || 10000;
+// ✅ Start Server
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
