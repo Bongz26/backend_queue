@@ -16,11 +16,11 @@ app.use((req, res, next) => {
     next();
 });
 
-// ✅ Fetch Orders (Including "Mixing" Orders)
+// ✅ Fetch Orders (Including "Mixing" and "Spraying" Orders)
 app.get("/api/orders", async (req, res) => {
     try {
         console.log("🛠 Fetching latest orders...");
-        await pool.query("DISCARD ALL"); // ✅ Clears connection cache before querying
+        await pool.query("DISCARD ALL");
 
         const result = await pool.query(`
             SELECT transaction_id, customer_name, client_contact, assigned_employee, 
@@ -30,9 +30,8 @@ app.get("/api/orders", async (req, res) => {
             ORDER BY current_status DESC 
             LIMIT 20
         `);
-        console.log(`🛠 Updating order: ${id} → ${current_status}`);
 
-        
+        console.log("✅ Orders fetched successfully:", result.rows);
         res.json(result.rows);
     } catch (err) {
         console.error("🚨 Error fetching orders:", err);
@@ -61,7 +60,7 @@ app.post("/api/orders", async (req, res) => {
     }
 });
 
-// ✅ Update Order Status
+// ✅ Update Order Status (Supports "Mixing" & "Spraying")
 app.put("/api/orders/:id", async (req, res) => {
     try {
         const { current_status, assigned_employee, colour_code } = req.body;
@@ -74,7 +73,7 @@ app.put("/api/orders/:id", async (req, res) => {
             [current_status, assigned_employee || null, colour_code || "Pending", id]
         );
 
-        console.log("✅ Order updated successfully!");
+        console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
         res.json({ message: "✅ Order status updated!" });
     } catch (error) {
         console.error("🚨 Error updating order:", error);
