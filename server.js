@@ -28,7 +28,7 @@ app.get("/api/orders", async (req, res) => {
             FROM Orders2 
             WHERE current_status != 'Ready' 
             ORDER BY current_status DESC 
-            LIMIT 10
+            LIMIT 20
         `);
 
         console.log("✅ Orders fetched successfully:", result.rows);
