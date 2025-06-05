@@ -31,7 +31,7 @@ app.get("/api/orders", async (req, res) => {
             LIMIT 20
         `);
 
-        console.log("✅ Orders fetched successfully:", result.rows);
+        console.log("✅ Orders fetched successfully");
         res.json(result.rows);
     } catch (err) {
         console.error("🚨 Error fetching orders:", err);
