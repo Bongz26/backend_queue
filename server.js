@@ -32,7 +32,7 @@ app.get("/api/orders", async (req, res) => {
         `);
         console.log(`🛠 Updating order: ${id} → ${current_status}`);
 
-        console.log("✅ Orders fetched successfully:", result.rows);
+        
         res.json(result.rows);
     } catch (err) {
         console.error("🚨 Error fetching orders:", err);
