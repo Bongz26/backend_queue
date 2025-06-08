@@ -26,7 +26,7 @@ app.get("/api/orders", async (req, res) => {
                    current_status, colour_code, paint_type, start_time, paint_quantity, order_type, category
             FROM Orders2 
             WHERE current_status NOT IN ('Ready') 
-            ORDER BY current_status DESC 
+            ORDER BY transaction_id DESC 
             LIMIT 20
         `);
 
