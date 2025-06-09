@@ -78,12 +78,10 @@ app.put("/api/orders/:id", async (req, res) => {
         let { current_status, assigned_employee, colour_code } = req.body;
         const { id } = req.params;
 
-        // ✅ Convert "Back to Mixing" into "Re-Mixing"
         if (current_status === "Back to Mixing") {
             current_status = "Re-Mixing";
-        }
 
-         // ✅ Preserve previous employee assignment
+            // ✅ Preserve previous employee assignment
             const prevEmployee = await pool.query(
                 "SELECT assigned_employee FROM Orders2 WHERE transaction_id = $1",
                 [id]
@@ -99,7 +97,7 @@ app.put("/api/orders/:id", async (req, res) => {
         );
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
-        res.json({ message: `✅ Order status updated to ${current_status}!` });
+        res.json({ message: `✅ Order status updated to ${current_status}` });
     } catch (error) {
         console.error("🚨 Error updating order:", error);
         res.status(500).json({ error: error.message });
