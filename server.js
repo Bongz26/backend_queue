@@ -78,15 +78,10 @@ app.put("/api/orders/:id", async (req, res) => {
         let { current_status, assigned_employee, colour_code } = req.body;
         const { id } = req.params;
 
-        if (current_status === "Back to Mixing") {
-            current_status = "Re-Mixing";
-
-            // ✅ Preserve previous employee assignment
-            const prevEmployee = await pool.query(
-                "SELECT assigned_employee FROM Orders2 WHERE transaction_id = $1",
-                [id]
-            );
-            assigned_employee = prevEmployee.rows[0]?.assigned_employee || assigned_employee;
+        // ✅ Validate allowed statuses
+        const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
+        if (!validStatuses.includes(current_status)) {
+            return res.status(400).json({ error: "Invalid status update!" });
         }
 
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
