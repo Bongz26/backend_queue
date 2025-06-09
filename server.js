@@ -115,6 +115,26 @@ app.get("/api/employees", async (req, res) => {
     }
 });
 
+app.get("/api/orders/admin", async (req, res) => {
+    try {
+        console.log("🛠 Fetching Ready orders for Admin...");
+        const result = await pool.query(`
+            SELECT transaction_id, customer_name, client_contact, assigned_employee, 
+                   current_status, colour_code, paint_type, start_time, paint_quantity, order_type, category
+            FROM Orders2 
+            WHERE current_status = 'Ready' 
+            ORDER BY start_time DESC
+        `);
+        
+        console.log("✅ Ready orders fetched successfully");
+        res.json(result.rows);
+    } catch (error) {
+        console.error("🚨 Error fetching Ready orders:", error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 app.get("/", (req, res) => {
     res.send("🚀 Backend is alive!");
 });
