@@ -160,6 +160,25 @@ app.put("/api/orders/mark-paid/:id", async (req, res) => {
     }
 });
 
+app.put("/api/orders/:id", async (req, res) => {
+    try {
+        let { current_status, assigned_employee, colour_code } = req.body;
+        const { id } = req.params;
+
+        // ✅ Convert "Back to Mixing" into "Re-Mixing"
+        if (current_status === "Back to Mixing") {
+            current_status = "Re-Mixing";
+        }
+
+        console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
+
+        await pool.query(
+            "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
+            [current_status, assigned_employee, colour_code || "Pending", id]
+        );
+
+
+
 
 app.get("/", (req, res) => {
     res.send("🚀 Backend is alive!");
