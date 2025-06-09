@@ -92,6 +92,23 @@ app.put("/api/orders/:id", async (req, res) => {
     }
 });
 
+app.put("/api/orders/mark-paid/:id", async (req, res) => {
+    const { id } = req.params;
+    const { userRole } = req.body;
+
+    if (userRole !== "Admin") {
+        return res.status(403).json({ error: "Only Admins can mark orders as Paid!" });
+    }
+
+    try {
+        await pool.query("UPDATE Orders2 SET current_status = 'Paid' WHERE transaction_id = $1", [id]);
+        res.json({ message: "✅ Order marked as Paid!" });
+    } catch (error) {
+        res.status(500).json({ error: "Error marking order as Paid." });
+    }
+});
+
+
 // ✅ Backend status check
 app.get("/", (req, res) => {
     res.send("🚀 Backend is alive!");
