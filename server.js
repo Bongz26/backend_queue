@@ -73,11 +73,15 @@ app.post("/api/orders", async (req, res) => {
     }
 });
 
-// ✅ Update Order Status (Supports "Mixing" & "Spraying")
 app.put("/api/orders/:id", async (req, res) => {
     try {
-        const { current_status, assigned_employee, colour_code } = req.body;
+        let { current_status, assigned_employee, colour_code } = req.body;
         const { id } = req.params;
+
+        // ✅ Convert "Back to Mixing" into "Re-Mixing"
+        if (current_status === "Back to Mixing") {
+            current_status = "Re-Mixing";
+        }
 
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
 
@@ -87,7 +91,7 @@ app.put("/api/orders/:id", async (req, res) => {
         );
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
-        res.json({ message: "✅ Order status updated!" });
+        res.json({ message: `✅ Order status updated to ${current_status}!` });
     } catch (error) {
         console.error("🚨 Error updating order:", error);
         res.status(500).json({ error: error.message });
