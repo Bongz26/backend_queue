@@ -83,6 +83,14 @@ app.put("/api/orders/:id", async (req, res) => {
             current_status = "Re-Mixing";
         }
 
+         // ✅ Preserve previous employee assignment
+            const prevEmployee = await pool.query(
+                "SELECT assigned_employee FROM Orders2 WHERE transaction_id = $1",
+                [id]
+            );
+            assigned_employee = prevEmployee.rows[0]?.assigned_employee || assigned_employee;
+        }
+
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
 
         await pool.query(
