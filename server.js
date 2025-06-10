@@ -68,10 +68,15 @@ app.post("/api/orders", async (req, res) => {
         console.log("✅ Order added successfully!");
         res.json({ message: "✅ Order added successfully!" });
     } catch (error) {
+        if (error.code === '23505') { // ✅ PostgreSQL UNIQUE constraint violation error code
+            return res.status(400).json({ error: "❌ Duplicate Transaction ID! Please use a unique ID." });
+        }
+
         console.error("🚨 Error adding order:", error);
         res.status(500).json({ error: error.message });
     }
 });
+
 
 app.put("/api/orders/:id", async (req, res) => {
     try {
