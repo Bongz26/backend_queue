@@ -84,28 +84,17 @@ app.put("/api/orders/:id", async (req, res) => {
             return res.status(400).json({ error: "Invalid status update!" });
         }
 
+        // ✅ Require Colour Code when marking as "Ready"
+        if (current_status === "Ready" && (!colour_code || colour_code === "Pending")) {
+            return res.status(400).json({ error: "Colour Code is required to mark order as Ready!" });
+        }
+
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
 
         await pool.query(
             "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
             [current_status, assigned_employee, colour_code || "Pending", id]
         );
-
-    try {
-        let { current_status, colour_code } = req.body;
-        const { id } = req.params;
-
-        if (current_status === "Ready" && (!colour_code || colour_code === "Pending")) {
-            return res.status(400).json({ error: "Colour Code is required to mark order as Ready!" });
-        }
-
-        console.log("🛠 Updating order:", { id, current_status, colour_code });
-
-        await pool.query(
-            "UPDATE Orders2 SET current_status = $1, colour_code = $2 WHERE transaction_id = $3",
-            [current_status, colour_code || "Pending", id]
-        );
-
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
         res.json({ message: `✅ Order status updated to ${current_status}` });
