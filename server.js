@@ -86,29 +86,28 @@ app.put("/api/orders/:id", async (req, res) => {
         // ✅ Validate allowed statuses
         const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
         if (!validStatuses.includes(current_status)) {
-            return res.status(400).json({ error: "Invalid status update!" });
+            return res.status(400).json({ error: "❌ Invalid status update!" });
         }
 
         // ✅ Require Colour Code when marking as "Ready"
-        if (current_status === "Ready" && (!colour_code || colour_code === "Pending")) {
-            return res.status(400).json({ error: "Colour Code is required to mark order as Ready!" });
+        if (current_status === "Ready" && (!colour_code || colour_code.trim() === "")) {
+            return res.status(400).json({ error: "❌ Colour Code is required to mark order as Ready!" });
+        }
+
+        // ✅ Require Employee Assignment for Status Changes (except "Waiting")
+        if (current_status !== "Waiting" && (!assigned_employee || assigned_employee.trim() === "")) {
+            return res.status(400).json({ error: "❌ Employee must be assigned when updating order status!" });
         }
 
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
- // ✅ Correct SQL Query Formatting
-        let updateQuery = `
+
+        // ✅ Always update assigned_employee
+        const updateQuery = `
             UPDATE Orders2 
-            SET current_status = $1, colour_code = $2
+            SET current_status = $1, colour_code = $2, assigned_employee = $3
+            WHERE transaction_id = $4
         `;
-        let queryParams = [current_status, colour_code || "Pending"];
-
-        if (assigned_employee) {
-            updateQuery += ", assigned_employee = $3";
-            queryParams.push(assigned_employee);
-        }
-
-        updateQuery += " WHERE transaction_id = $4";
-        queryParams.push(id);
+        const queryParams = [current_status, colour_code || "Pending", assigned_employee, id];
 
         await pool.query(updateQuery, queryParams);
 
@@ -119,7 +118,6 @@ app.put("/api/orders/:id", async (req, res) => {
         res.status(500).json({ error: error.message });
     }
 });
-
 
 // ✅ Verify Employee Code
 app.get("/api/employees", async (req, res) => {
