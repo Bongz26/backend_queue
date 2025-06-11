@@ -95,21 +95,22 @@ app.put("/api/orders/:id", async (req, res) => {
         }
 
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
+ // ✅ Correct SQL Query Formatting
+        let updateQuery = `
+            UPDATE Orders2 
+            SET current_status = $1, colour_code = $2
+        `;
+        let queryParams = [current_status, colour_code || "Pending"];
 
-        const updateQuery = `
-    UPDATE Orders2 
-    SET current_status = $1, colour_code = $2
-    ${assigned_employee ? ", assigned_employee = $3" : ""}
-    WHERE transaction_id = $4
-`;
+        if (assigned_employee) {
+            updateQuery += ", assigned_employee = $3";
+            queryParams.push(assigned_employee);
+        }
 
-const queryParams = assigned_employee
-    ? [current_status, colour_code || "Pending", assigned_employee, id]
-    : [current_status, colour_code || "Pending", id];
+        updateQuery += " WHERE transaction_id = $4";
+        queryParams.push(id);
 
-await pool.query(updateQuery, queryParams);
-
-
+        await pool.query(updateQuery, queryParams);
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
         res.json({ message: `✅ Order status updated to ${current_status}` });
@@ -118,6 +119,7 @@ await pool.query(updateQuery, queryParams);
         res.status(500).json({ error: error.message });
     }
 });
+
 
 // ✅ Verify Employee Code
 app.get("/api/employees", async (req, res) => {
