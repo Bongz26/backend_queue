@@ -96,10 +96,20 @@ app.put("/api/orders/:id", async (req, res) => {
 
         console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
 
-        await pool.query(
-            "UPDATE Orders2 SET current_status = $1, assigned_employee = $2, colour_code = $3 WHERE transaction_id = $4",
-            [current_status, assigned_employee, colour_code || "Pending", id]
-        );
+        const updateQuery = `
+    UPDATE Orders2 
+    SET current_status = $1, colour_code = $2
+    ${assigned_employee ? ", assigned_employee = $3" : ""}
+    WHERE transaction_id = $4
+`;
+
+const queryParams = assigned_employee
+    ? [current_status, colour_code || "Pending", assigned_employee, id]
+    : [current_status, colour_code || "Pending", id];
+
+await pool.query(updateQuery, queryParams);
+
+
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
         res.json({ message: `✅ Order status updated to ${current_status}` });
