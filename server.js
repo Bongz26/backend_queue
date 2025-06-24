@@ -8,7 +8,7 @@ app.use(express.json());
 const allowedOrigins = [
   "https://queue-system-ewrn.onrender.com",
   "https://fronttest-eibo.onrender.com",
-  "https://proctest.netlify.app/add-order"
+  "https://proctest.netlify.app"
 ];
 
 app.use(cors({
