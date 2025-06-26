@@ -37,10 +37,8 @@ app.get("/api/orders/search", async (req, res) => {
       const result = await pool.query(`
             SELECT transaction_id, customer_name, client_contact, assigned_employee, 
                    current_status, colour_code, paint_type, start_time, order_type
-            FROM Orders2 
-            WHERE current_status NOT IN ('Ready','Complete') 
-            ORDER BY current_status DESC 
-            LIMIT 20
+            FROM Orders2
+			      ORDER BY 1 DESC;
         `);
 
     res.json(result.rows);
