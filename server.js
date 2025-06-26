@@ -192,26 +192,44 @@ app.get("/api/orders/admin", async (req, res) => {
 });
 
 app.put("/api/orders/mark-paid/:id", async (req, res) => {
-    try {
-        const { userRole } = req.body;
-        const { id } = req.params;
+  try {
+    const { userRole } = req.body;
+    const { id } = req.params;
 
-        if (userRole !== "Admin") {
-            return res.status(403).json({ error: "Only Admins can mark orders as Paid" });
-        }
-
-        await pool.query(
-            "UPDATE Orders2 SET current_status = 'Complete' WHERE transaction_id = $1",
-            [id]
-        );
-
-        console.log(`✅ Order ${id} marked as Paid`);
-        res.json({ message: "✅ Order marked as Paid" });
-    } catch (error) {
-        console.error("🚨 Error marking as Paid:", error.message);
-        res.status(500).json({ error: error.message });
+    if (userRole !== "Admin") {
+      return res.status(403).json({ error: "Only Admins can mark orders as Paid" });
     }
+
+    // ✅ Check if order is READY before updating
+    const check = await pool.query(
+      "SELECT order_type, current_status FROM Orders2 WHERE transaction_id = $1",
+      [id]
+    );
+
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const order = check.rows[0];
+
+    if (order.current_status !== "Ready") {
+      return res.status(400).json({ error: "Only 'Ready' orders can be marked as Complete" });
+    }
+
+    await pool.query(
+      "UPDATE Orders2 SET current_status = 'Complete' WHERE transaction_id = $1",
+      [id]
+    );
+
+    console.log(`✅ Order ${id} marked as Complete`);
+    res.json({ message: "✅ Order marked as Complete" });
+
+  } catch (error) {
+    console.error("🚨 Error marking as Complete:", error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
+
 
 
 app.get("/", (req, res) => {
