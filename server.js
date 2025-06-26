@@ -35,8 +35,7 @@ app.get("/api/orders/search", async (req, res) => {
   try {
      
       const result = await pool.query(`
-            SELECT transaction_id, customer_name, client_contact, assigned_employee, 
-                   current_status, colour_code, paint_type, start_time, order_type
+            SELECT *
             FROM Orders2
 			      ORDER BY 1 DESC;
         `);
