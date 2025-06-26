@@ -30,6 +30,23 @@ app.use((req, res, next) => {
     next();
 });
 
+app.get("/api/orders/search", async (req, res) => {
+  const { q } = req.query; // query string value
+  try {
+    const result = await pool.query(`
+      SELECT * FROM Orders2
+      WHERE transaction_id ILIKE $1 OR client_contact ILIKE $1
+      ORDER BY start_time DESC
+    `, [`%${q}%`]);
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("🚨 Search failed:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // ✅ Fetch Orders (Including "Mixing" and "Spraying" Orders)
 app.get("/api/orders", async (req, res) => {
     try {
