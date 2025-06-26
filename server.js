@@ -33,11 +33,15 @@ app.use((req, res, next) => {
 app.get("/api/orders/search", async (req, res) => {
   const { q } = req.query; // query string value
   try {
-    const result = await pool.query(`
-      SELECT * FROM Orders2
-      WHERE transaction_id ILIKE $1 OR client_contact ILIKE $1
-      ORDER BY start_time DESC
-    `, [`%${q}%`]);
+     
+      const result = await pool.query(`
+            SELECT transaction_id, customer_name, client_contact, assigned_employee, 
+                   current_status, colour_code, paint_type, start_time, order_type
+            FROM Orders2 
+            WHERE current_status NOT IN ('Ready','Complete') 
+            ORDER BY current_status DESC 
+            LIMIT 20
+        `);
 
     res.json(result.rows);
   } catch (err) {
