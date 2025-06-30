@@ -36,7 +36,7 @@ app.get("/api/orders/search", async (req, res) => {
      
       const result = await pool.query(`
             SELECT *
-            FROM Orders2
+            FROM orders2
 			      ORDER BY 1 DESC;
         `);
 
@@ -57,7 +57,7 @@ app.get("/api/orders", async (req, res) => {
         const result = await pool.query(`
             SELECT transaction_id, customer_name, client_contact, assigned_employee, 
                    current_status, colour_code, paint_type, start_time, paint_quantity, order_type, category
-            FROM Orders2 
+            FROM orders2 
             WHERE current_status NOT IN ('Ready','Complete') 
             ORDER BY current_status DESC 
             LIMIT 20
@@ -74,7 +74,7 @@ app.get("/api/orders", async (req, res) => {
 app.get("/api/orders/active", async (req, res) => {
     try {
         const result = await pool.query(
-            "SELECT * FROM Orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending')"
+            "SELECT * FROM orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending')"
         );
         
         res.json(result.rows);
@@ -93,7 +93,7 @@ app.post("/api/orders", async (req, res) => {
         console.log("🛠 Adding new order:", req.body);
 
         await pool.query(
-            "INSERT INTO Orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type, start_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            "INSERT INTO orders2 (transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type, start_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             [transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type, start_time]
         );
 
@@ -135,7 +135,7 @@ app.put("/api/orders/:id", async (req, res) => {
 
         // ✅ Always update assigned_employee
         const updateQuery = `
-            UPDATE Orders2 
+            UPDATE orders2 
             SET current_status = $1, colour_code = $2, assigned_employee = $3
             WHERE transaction_id = $4
         `;
@@ -178,7 +178,7 @@ app.get("/api/orders/admin", async (req, res) => {
         const result = await pool.query(`
             SELECT transaction_id, customer_name, client_contact, assigned_employee, 
                    current_status, colour_code, paint_type, start_time, paint_quantity, order_type, category
-            FROM Orders2 
+            FROM orders2 
             WHERE current_status = 'Ready' and order_type in ('Order','Paid')
             ORDER BY start_time DESC
         `);
@@ -202,7 +202,7 @@ app.put("/api/orders/mark-paid/:id", async (req, res) => {
 
     // ✅ Check if order is READY before updating
     const check = await pool.query(
-      "SELECT order_type, current_status FROM Orders2 WHERE transaction_id = $1",
+      "SELECT order_type, current_status FROM orders2 WHERE transaction_id = $1",
       [id]
     );
 
@@ -217,7 +217,7 @@ app.put("/api/orders/mark-paid/:id", async (req, res) => {
     }
 
     await pool.query(
-      "UPDATE Orders2 SET current_status = 'Complete' WHERE transaction_id = $1",
+      "UPDATE orders2 SET current_status = 'Complete' WHERE transaction_id = $1",
       [id]
     );
 
