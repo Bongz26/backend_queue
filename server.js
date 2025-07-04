@@ -87,7 +87,27 @@ app.get("/api/orders/active", async (req, res) => {
 // ✅ Add New Order
 app.post("/api/orders", async (req, res) => {
     try {
-        const { transaction_id, customer_name, client_contact, paint_type, colour_code, category, paint_quantity, current_status, order_type } = req.body;
+       
+ let {
+  transaction_id,
+  customer_name,
+  client_contact,
+  paint_type,
+  colour_code,
+  category,
+  paint_quantity,
+  current_status,
+  order_type
+} = req.body;
+
+if (category === "New Mix") {
+  colour_code = "Pending";
+}
+
+if (!colour_code || colour_code.trim() === "") {
+  colour_code = "N/A";  // fallback for other cases
+}
+
         const start_time = new Date().toISOString(); // ✅ Store accurate time
 
         console.log("🛠 Adding new order:", req.body);
