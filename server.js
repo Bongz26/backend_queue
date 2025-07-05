@@ -162,6 +162,24 @@ app.put("/api/orders/:id", async (req, res) => {
         const queryParams = [current_status, colour_code || "Pending", assigned_employee, id];
 
         await pool.query(updateQuery, queryParams);
+	
+	// After order update:
+	await pool.query(
+	  `INSERT INTO audit_logs 
+	   (order_id, action, from_status, to_status, employee_name, user_role, colour_code, remarks)
+	   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+	  [
+	    orderId,
+	    "Status Changed",
+	    oldStatus,
+	    newStatus,
+	    employeeName,
+	    req.body.userRole,
+	    req.body.colour_code || null,
+	    "Status updated via UI"
+	  ]
+	);
+
 
         console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
         res.json({ message: `✅ Order status updated to ${current_status}` });
