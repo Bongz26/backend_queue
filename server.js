@@ -55,13 +55,22 @@ app.get("/api/orders", async (req, res) => {
         await pool.query("DISCARD ALL");
 
         const result = await pool.query(`
-            SELECT transaction_id, customer_name, client_contact, assigned_employee, 
-                   current_status, colour_code, paint_type, start_time, paint_quantity, order_type, category
-            FROM orders2 
-            WHERE current_status NOT IN ('Ready','Complete') 
-            ORDER BY current_status DESC 
-            LIMIT 20
-        `);
+		 SELECT o.transaction_id, o.customer_name, o.client_contact, o.assigned_employee, 
+		         o.current_status, o.colour_code, o.paint_type, o.start_time, 
+		         o.paint_quantity, o.order_type, o.category,
+		         h.entered_at AS status_started_at
+	 		 FROM orders2 o
+	  	LEFT JOIN LATERAL (
+	    	SELECT entered_at
+	    	FROM order_status_history
+	    	WHERE order_id = o.transaction_id AND status = o.current_status
+	    	ORDER BY entered_at DESC
+	   	 LIMIT 1
+	  ) h ON true
+	  WHERE o.current_status NOT IN ('Ready','Complete') 
+	  ORDER BY o.current_status DESC 
+	  LIMIT 20
+	`);
 
         console.log("✅ Orders fetched successfully");
         res.json(result.rows);
@@ -131,71 +140,74 @@ if (!colour_code || colour_code.trim() === "") {
 
 
 app.put("/api/orders/:id", async (req, res) => {
-    try {
-        let { current_status, assigned_employee, colour_code } = req.body;
-        const { id } = req.params;
+  try {
+    let { current_status, assigned_employee, colour_code } = req.body;
+    const { id } = req.params;
 
-        // ✅ Validate allowed statuses
-        const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
-        if (!validStatuses.includes(current_status)) {
-            return res.status(400).json({ error: "❌ Invalid status update!" });
-        }
-
-        // ✅ Require Colour Code when marking as "Ready"
-        if (current_status === "Ready" && (!colour_code || colour_code.trim() === "")) {
-            return res.status(400).json({ error: "❌ Colour Code is required to mark order as Ready!" });
-        }
-
-        // ✅ Require Employee Assignment for Status Changes (except "Waiting")
-        if (current_status !== "Waiting" && (!assigned_employee || assigned_employee.trim() === "")) {
-            return res.status(400).json({ error: "❌ Employee must be assigned when updating order status!" });
-        }
-
-        console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
-
-        // ✅ Always update assigned_employee
-        const updateQuery = `
-            UPDATE orders2 
-            SET current_status = $1, colour_code = $2, assigned_employee = $3
-            WHERE transaction_id = $4
-        `;
-        const queryParams = [current_status, colour_code || "Pending", assigned_employee, id];
-
-        // ✅ Final order update
-await pool.query(updateQuery, queryParams);
-
-// 🔍 Capture variables for audit
-const orderId = id;
-const oldStatus = req.body.old_status || "Unknown"; // fallback if not sent
-const newStatus = current_status;
-const employeeName = assigned_employee;
-const colourCode = req.body.colour_code || null;
-const userRole = req.body.userRole || "Unknown";
-
-// ✅ Insert audit log
-await pool.query(
-  `INSERT INTO audit_logs 
-   (order_id, action, from_status, to_status, employee_name, user_role, colour_code, remarks)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-  [
-    orderId,
-    "Status Changed",
-    oldStatus,
-    newStatus,
-    employeeName,
-    userRole,
-    colourCode,
-    "Status updated via UI"
-  ]
-);
-
-        console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
-        res.json({ message: `✅ Order status updated to ${current_status}` });
-    } catch (error) {
-        console.error("🚨 Error updating order:", error);
-        res.status(500).json({ error: error.message });
+    // ✅ Validate allowed statuses
+    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
+    if (!validStatuses.includes(current_status)) {
+      return res.status(400).json({ error: "❌ Invalid status update!" });
     }
+
+    // ✅ Require Colour Code when marking as "Ready"
+    if (current_status === "Ready" && (!colour_code || colour_code.trim() === "")) {
+      return res.status(400).json({ error: "❌ Colour Code is required to mark order as Ready!" });
+    }
+
+    // ✅ Require Employee Assignment for Status Changes (except "Waiting")
+    if (current_status !== "Waiting" && (!assigned_employee || assigned_employee.trim() === "")) {
+      return res.status(400).json({ error: "❌ Employee must be assigned when updating order status!" });
+    }
+
+    console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code });
+
+    // ✅ Update order
+    await pool.query(
+      `UPDATE orders2 
+       SET current_status = $1, colour_code = $2, assigned_employee = $3
+       WHERE transaction_id = $4`,
+      [current_status, colour_code || "Pending", assigned_employee, id]
+    );
+
+    // ✅ Insert into order_status_history
+    await pool.query(
+      `INSERT INTO order_status_history (order_id, status)
+       VALUES ($1, $2)`,
+      [id, current_status]
+    );
+
+    // ✅ Audit Log
+    const orderId = id;
+    const oldStatus = req.body.old_status || "Unknown";
+    const newStatus = current_status;
+    const employeeName = assigned_employee;
+    const userRole = req.body.userRole || "Unknown";
+
+    await pool.query(
+      `INSERT INTO audit_logs 
+       (order_id, action, from_status, to_status, employee_name, user_role, colour_code, remarks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        orderId,
+        "Status Changed",
+        oldStatus,
+        newStatus,
+        employeeName,
+        userRole,
+        colour_code || null,
+        "Status updated via UI"
+      ]
+    );
+
+    console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
+    res.json({ message: `✅ Order status updated to ${current_status}` });
+  } catch (error) {
+    console.error("🚨 Error updating order:", error);
+    res.status(500).json({ error: error.message });
+  }
 });
+
 
 // ✅ Verify Employee Code
 app.get("/api/employees", async (req, res) => {
