@@ -296,7 +296,7 @@ app.put("/api/orders/archive-old", async (req, res) => {
       SET archived = TRUE
       WHERE current_status = 'Waiting'
         AND archived = FALSE
-        AND COALESCE(status_started_at, start_time) < NOW() - INTERVAL '21 days'
+        AND COALESCE(start_time) < NOW() - INTERVAL '21 days'
     `);
 
     res.json({ message: `✅ ${result.rowCount} orders archived.` });
