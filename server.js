@@ -292,7 +292,7 @@ app.put("/api/orders/mark-paid/:id", async (req, res) => {
 app.put("/api/orders/archive-old", async (req, res) => {
   try {
     const result = await pool.query(`
-      UPDATE orders
+      UPDATE orders2
       SET archived = TRUE
       WHERE current_status = 'Waiting'
         AND archived = FALSE
@@ -305,7 +305,6 @@ app.put("/api/orders/archive-old", async (req, res) => {
     res.status(500).json({ error: "Failed to archive old orders." });
   }
 });
-
 
 app.get("/", (req, res) => {
     res.send("🚀 Backend is alive!");
