@@ -288,6 +288,23 @@ app.put("/api/orders/mark-paid/:id", async (req, res) => {
   }
 });
 
+// Archive Waiting orders older than 21 days
+app.put("/api/orders/archive-old", async (req, res) => {
+  try {
+    const result = await pool.query(`
+      UPDATE orders
+      SET archived = TRUE
+      WHERE current_status = 'Waiting'
+        AND archived = FALSE
+        AND COALESCE(status_started_at, start_time) < NOW() - INTERVAL '21 days'
+    `);
+
+    res.json({ message: `✅ ${result.rowCount} orders archived.` });
+  } catch (err) {
+    console.error("❌ Archiving failed:", err.message);
+    res.status(500).json({ error: "Failed to archive old orders." });
+  }
+});
 
 
 app.get("/", (req, res) => {
