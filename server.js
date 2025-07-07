@@ -68,6 +68,7 @@ app.get("/api/orders", async (req, res) => {
 	   	 LIMIT 1
 	  ) h ON true
 	  WHERE o.current_status NOT IN ('Ready','Complete') 
+		AND o.archived = FALSE
 	  ORDER BY o.current_status DESC 
 	  LIMIT 20
 	`);
