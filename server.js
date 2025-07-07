@@ -63,7 +63,7 @@ app.get("/api/orders", async (req, res) => {
 	  	LEFT JOIN LATERAL (
 	    	SELECT entered_at
 	    	FROM order_status_history
-	    	WHERE order_id = o.transaction_id AND status = o.current_status
+	    	WHERE transaction_id= o.transaction_id AND status = o.current_status
 	    	ORDER BY entered_at DESC
 	   	 LIMIT 1
 	  ) h ON true
@@ -172,7 +172,7 @@ app.put("/api/orders/:id", async (req, res) => {
 
     // ✅ Insert into order_status_history
     await pool.query(
-      `INSERT INTO order_status_history (order_id, status)
+      `INSERT INTO order_status_history (transaction_id, status)
        VALUES ($1, $2)`,
       [id, current_status]
     );
