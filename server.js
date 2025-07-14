@@ -47,6 +47,21 @@ app.get("/api/orders/search", async (req, res) => {
   }
 });
 
+// ✅ Check if transaction ID exists
+app.get("/api/orders/check-id/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const result = await pool.query("SELECT 1 FROM orders2 WHERE transaction_id = $1", [id]);
+    if (result.rowCount > 0) {
+      return res.status(409).json({ exists: true }); // 409 = conflict
+    } else {
+      return res.status(200).json({ exists: false });
+    }
+  } catch (error) {
+    console.error("❌ Error checking transaction ID:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
 
 // ✅ Fetch Orders (Including "Mixing" and "Spraying" Orders)
 app.get("/api/orders", async (req, res) => {
