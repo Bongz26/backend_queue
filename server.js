@@ -287,10 +287,10 @@ app.delete("/api/orders/:id", async (req, res) => {
   }
 });
 
-// Fetch Staff
+// Fetch Staff (Using employees table)
 app.get("/api/staff", async (req, res) => {
   try {
-    console.log("🛠 Fetching staff list...");
+    console.log("🛠 Fetching staff list from employees table...");
     const result = await pool.query("SELECT employee_name, employee_code AS code, role FROM employees");
     console.log("✅ Staff list fetched successfully");
     res.json(result.rows);
@@ -300,14 +300,14 @@ app.get("/api/staff", async (req, res) => {
   }
 });
 
-// Add Staff
+// Add Staff (Using employees table)
 app.post("/api/staff", async (req, res) => {
   try {
     const { employee_name, code, role } = req.body;
     if (!employee_name || !code || !role) {
       return res.status(400).json({ error: "❌ Employee name, code, and role are required" });
     }
-    console.log("🛠 Adding new staff:", req.body);
+    console.log("🛠 Adding new staff to employees table:", req.body);
     await pool.query(
       `INSERT INTO employees (employee_name, employee_code, role)
        VALUES ($1, $2, $3)`,
@@ -324,7 +324,7 @@ app.post("/api/staff", async (req, res) => {
   }
 });
 
-// Edit Staff
+// Edit Staff (Using employees table)
 app.put("/api/staff/:code", async (req, res) => {
   try {
     const { code } = req.params;
@@ -332,7 +332,7 @@ app.put("/api/staff/:code", async (req, res) => {
     if (!employee_name || !role) {
       return res.status(400).json({ error: "❌ Employee name and role are required" });
     }
-    console.log("🛠 Updating staff:", { code, employee_name, role });
+    console.log("🛠 Updating staff in employees table:", { code, employee_name, role });
     await pool.query(
       `UPDATE employees
        SET employee_name = $1, role = $2
@@ -347,11 +347,11 @@ app.put("/api/staff/:code", async (req, res) => {
   }
 });
 
-// Remove Staff
+// Remove Staff (Using employees table)
 app.delete("/api/staff/:code", async (req, res) => {
   try {
     const { code } = req.params;
-    console.log(`🛠 Deleting staff: ${code}`);
+    console.log(`🛠 Deleting staff from employees table: ${code}`);
     await pool.query(`DELETE FROM employees WHERE employee_code = $1`, [code]);
     console.log("✅ Staff deleted successfully");
     res.json({ message: "✅ Staff deleted successfully" });
@@ -361,11 +361,11 @@ app.delete("/api/staff/:code", async (req, res) => {
   }
 });
 
-// Verify Employee Code
+// Verify Employee Code (Using employees table)
 app.get("/api/employees", async (req, res) => {
   try {
     const { code } = req.query;
-    console.log("🔍 Searching for Employee Code:", code);
+    console.log("🔍 Searching for Employee Code in employees table:", code);
     const result = await pool.query(
       "SELECT employee_name, role FROM employees WHERE TRIM(employee_code) = TRIM($1)",
       [code]
