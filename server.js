@@ -9,7 +9,8 @@ app.use(express.json());
 const allowedOrigins = [
   "https://queue-system-ewrn.onrender.com",
   "https://fronttest-eibo.onrender.com",
-  "https://proctest.netlify.app"
+  "https://proctest.netlify.app",
+  "http://localhost:3000" // Added for local testing
 ];
 
 app.use(cors({
@@ -34,11 +35,13 @@ app.use((req, res, next) => {
 app.get("/api/orders/search", async (req, res) => {
   const { q } = req.query;
   try {
+    console.log("🔍 Searching orders with query:", q);
     const result = await pool.query(`
       SELECT *
       FROM orders2
       ORDER BY 1 DESC
     `);
+    console.log("✅ Search returned:", result.rows.length, "orders");
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Search failed:", err);
@@ -50,10 +53,13 @@ app.get("/api/orders/search", async (req, res) => {
 app.get("/api/orders/check-id/:id", async (req, res) => {
   const { id } = req.params;
   try {
+    console.log("🔍 Checking transaction ID:", id);
     const result = await pool.query("SELECT 1 FROM orders2 WHERE transaction_id = $1", [id]);
     if (result.rowCount > 0) {
+      console.log("⚠️ Transaction ID exists");
       return res.status(409).json({ exists: true });
     } else {
+      console.log("✅ Transaction ID available");
       return res.status(200).json({ exists: false });
     }
   } catch (error) {
@@ -65,7 +71,7 @@ app.get("/api/orders/check-id/:id", async (req, res) => {
 // Fetch Active Orders
 app.get("/api/orders", async (req, res) => {
   try {
-    console.log("🛠 Fetching latest orders...");
+    console.log("🛠 Fetching active orders...");
     await pool.query("DISCARD ALL");
     const result = await pool.query(`
       SELECT o.transaction_id, o.customer_name, o.client_contact, o.assigned_employee,
@@ -86,7 +92,7 @@ app.get("/api/orders", async (req, res) => {
       ORDER BY o.current_status DESC
       LIMIT 20
     `);
-    console.log("✅ Orders fetched successfully");
+    console.log("✅ Active orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching orders:", err);
@@ -106,7 +112,7 @@ app.get("/api/orders/archived", async (req, res) => {
       WHERE archived = TRUE
       ORDER BY start_time DESC
     `);
-    console.log("✅ Archived orders fetched successfully");
+    console.log("✅ Archived orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching archived orders:", err);
@@ -125,7 +131,7 @@ app.get("/api/orders/deleted", async (req, res) => {
       FROM deleted_orders
       ORDER BY start_time DESC
     `);
-    console.log("✅ Deleted orders fetched successfully");
+    console.log("✅ Deleted orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching deleted orders:", err);
@@ -292,7 +298,7 @@ app.get("/api/staff", async (req, res) => {
   try {
     console.log("🛠 Fetching staff list from employees table...");
     const result = await pool.query("SELECT employee_name, employee_code AS code, role FROM employees");
-    console.log("✅ Staff list fetched successfully");
+    console.log("✅ Staff list fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching staff:", err);
@@ -361,13 +367,13 @@ app.delete("/api/staff/:code", async (req, res) => {
   }
 });
 
-// Verify Employee Code (Using employees table)
+// Verify Employee Code (Using employees table, matching your original endpoint)
 app.get("/api/employees", async (req, res) => {
   try {
     const { code } = req.query;
     console.log("🔍 Searching for Employee Code in employees table:", code);
     const result = await pool.query(
-      "SELECT employee_name, role FROM employees WHERE TRIM(employee_code) = TRIM($1)",
+      "SELECT employee_name FROM employees WHERE TRIM(employee_code) = TRIM($1)",
       [code]
     );
     if (result.rows.length === 0) {
@@ -375,7 +381,7 @@ app.get("/api/employees", async (req, res) => {
       return res.status(404).json({ error: "Invalid Employee Code" });
     }
     console.log("✅ Employee found:", result.rows[0].employee_name);
-    res.json({ employee_name: result.rows[0].employee_name, role: result.rows[0].role });
+    res.json({ employee_name: result.rows[0].employee_name });
   } catch (error) {
     console.error("🚨 Error fetching employee:", error);
     res.status(500).json({ error: error.message });
@@ -394,7 +400,7 @@ app.get("/api/orders/admin", async (req, res) => {
       WHERE current_status = 'Ready' AND order_type IN ('Order', 'Paid')
       ORDER BY start_time DESC
     `);
-    console.log("✅ Ready orders fetched successfully");
+    console.log("✅ Ready orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (error) {
     console.error("🚨 Error fetching Ready orders:", error);
@@ -436,6 +442,7 @@ app.put("/api/orders/mark-paid/:id", async (req, res) => {
 // Archive Old Waiting Orders
 app.put("/api/orders/archive-old", async (req, res) => {
   try {
+    console.log("🛠 Archiving old orders...");
     const result = await pool.query(`
       UPDATE orders2
       SET archived = TRUE
@@ -443,10 +450,11 @@ app.put("/api/orders/archive-old", async (req, res) => {
       AND archived = FALSE
       AND COALESCE(start_time) < NOW() - INTERVAL '21 days'
     `);
-    res.json({ message: `✅ ${result.rowCount} orders archived.` });
+    console.log(`✅ ${result.rowCount} orders archived`);
+    res.json({ message: `✅ ${result.rowCount} orders archived` });
   } catch (err) {
     console.error("❌ Archiving failed:", err.message);
-    res.status(500).json({ error: "Failed to archive old orders." });
+    res.status(500).json({ error: "Failed to archive old orders" });
   }
 });
 
