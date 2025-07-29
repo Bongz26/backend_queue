@@ -71,7 +71,7 @@ app.get("/api/orders/check-id/:id", async (req, res) => {
 // Fetch Active Orders
 app.get("/api/orders", async (req, res) => {
   try {
-    console.log("🛠 Fetching active orders...");
+    console.log("🛠 Fetching latest orders...");
     await pool.query("DISCARD ALL");
     const result = await pool.query(`
       SELECT o.transaction_id, o.customer_name, o.client_contact, o.assigned_employee,
@@ -97,6 +97,21 @@ app.get("/api/orders", async (req, res) => {
   } catch (err) {
     console.error("🚨 Error fetching orders:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch Active Orders (Original /api/orders/active)
+app.get("/api/orders/active", async (req, res) => {
+  try {
+    console.log("🛠 Fetching active orders (Mixing, Waiting, Pending)...");
+    const result = await pool.query(
+      "SELECT * FROM orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending')"
+    );
+    console.log("✅ Active orders fetched:", result.rows.length);
+    res.json(result.rows);
+  } catch (error) {
+    console.error("🚨 Error fetching active orders:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -189,8 +204,8 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// Update Order Status
-app.put("/api/orders/:id/status", async (req, res) => {
+// Update Order Status (Updated to match original endpoint and add note support)
+app.put("/api/orders/:id", async (req, res) => {
   try {
     let { current_status, assigned_employee, colour_code, note } = req.body;
     const { id } = req.params;
@@ -259,7 +274,6 @@ app.delete("/api/orders/:id", async (req, res) => {
   try {
     console.log(`🛠 Deleting order: ${id}`);
 
-    // Move to deleted_orders table for audit purposes
     await pool.query(
       `INSERT INTO deleted_orders (
         transaction_id, customer_name, client_contact, assigned_employee,
@@ -274,10 +288,8 @@ app.delete("/api/orders/:id", async (req, res) => {
       [id]
     );
 
-    // Delete from orders2
     await pool.query(`DELETE FROM orders2 WHERE transaction_id = $1`, [id]);
 
-    // Log to audit_logs
     await pool.query(
       `INSERT INTO audit_logs
        (order_id, action, from_status, to_status, employee_name, user_role, remarks)
@@ -293,7 +305,7 @@ app.delete("/api/orders/:id", async (req, res) => {
   }
 });
 
-// Fetch Staff (Using employees table)
+// Fetch Staff
 app.get("/api/staff", async (req, res) => {
   try {
     console.log("🛠 Fetching staff list from employees table...");
@@ -306,7 +318,7 @@ app.get("/api/staff", async (req, res) => {
   }
 });
 
-// Add Staff (Using employees table)
+// Add Staff
 app.post("/api/staff", async (req, res) => {
   try {
     const { employee_name, code, role } = req.body;
@@ -330,7 +342,7 @@ app.post("/api/staff", async (req, res) => {
   }
 });
 
-// Edit Staff (Using employees table)
+// Edit Staff
 app.put("/api/staff/:code", async (req, res) => {
   try {
     const { code } = req.params;
@@ -353,7 +365,7 @@ app.put("/api/staff/:code", async (req, res) => {
   }
 });
 
-// Remove Staff (Using employees table)
+// Remove Staff
 app.delete("/api/staff/:code", async (req, res) => {
   try {
     const { code } = req.params;
@@ -367,15 +379,12 @@ app.delete("/api/staff/:code", async (req, res) => {
   }
 });
 
-// Verify Employee Code (Using employees table, matching your original endpoint)
+// Verify Employee Code (Original endpoint)
 app.get("/api/employees", async (req, res) => {
   try {
     const { code } = req.query;
-    console.log("🔍 Searching for Employee Code in employees table:", code);
-    const result = await pool.query(
-      "SELECT employee_name FROM employees WHERE TRIM(employee_code) = TRIM($1)",
-      [code]
-    );
+    console.log("🔍 Searching for Employee Code:", code);
+    const result = await pool.query("SELECT employee_name FROM employees WHERE TRIM(employee_code) = TRIM($1)", [code]);
     if (result.rows.length === 0) {
       console.warn("❌ Invalid Employee Code!");
       return res.status(404).json({ error: "Invalid Employee Code" });
