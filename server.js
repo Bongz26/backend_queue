@@ -204,7 +204,7 @@ app.post("/api/orders", async (req, res) => {
   }
 });
 
-// Update Order Status (Updated to match original endpoint and add note support)
+// Update Order Status
 app.put("/api/orders/:id", async (req, res) => {
   try {
     let { current_status, assigned_employee, colour_code, note } = req.body;
