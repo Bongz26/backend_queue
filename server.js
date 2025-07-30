@@ -10,7 +10,7 @@ const allowedOrigins = [
   "https://queue-system-ewrn.onrender.com",
   "https://fronttest-eibo.onrender.com",
   "https://proctest.netlify.app",
-  "http://localhost:3000" // Added for local testing
+  "http://localhost:3000"
 ];
 
 app.use(cors({
@@ -207,7 +207,7 @@ app.post("/api/orders", async (req, res) => {
 // Update Order Status
 app.put("/api/orders/:id", async (req, res) => {
   try {
-    let { current_status, assigned_employee, colour_code, note } = req.body;
+    let { current_status, assigned_employee, colour_code, note, old_status, userRole } = req.body;
     const { id } = req.params;
 
     const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
@@ -223,8 +223,19 @@ app.put("/api/orders/:id", async (req, res) => {
       return res.status(400).json({ error: "❌ Employee must be assigned when updating order status!" });
     }
 
+    // Fetch current order to check if status changed
+    const currentOrder = await pool.query(
+      "SELECT current_status, note FROM orders2 WHERE transaction_id = $1",
+      [id]
+    );
+    if (currentOrder.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    const { current_status: existingStatus, note: existingNote } = currentOrder.rows[0];
+
     console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code, note });
 
+    // Update orders2
     await pool.query(
       `UPDATE orders2
        SET current_status = $1, colour_code = $2, assigned_employee = $3, note = $4
@@ -232,61 +243,60 @@ app.put("/api/orders/:id", async (req, res) => {
       [current_status, colour_code || "Pending", assigned_employee, note || null, id]
     );
 
-    await pool.query(
-      `INSERT INTO order_status_history (transaction_id, status)
-       VALUES ($1, $2)`,
-      [id, current_status]
-    );
+    // Only insert into order_status_history if status changed
+    if (current_status !== existingStatus) {
+      await pool.query(
+        `INSERT INTO order_status_history (transaction_id, status)
+         VALUES ($1, $2)`,
+        [id, current_status]
+      );
+    }
 
-    const orderId = id;
-    const oldStatus = req.body.old_status || "Unknown";
-    const newStatus = current_status;
-    const employeeName = assigned_employee;
-    const userRole = req.body.userRole || "Unknown";
-
+    // Log to audit_logs
+    const action = current_status !== existingStatus ? "Status Changed" : "Note Updated";
+    const remarks = note && note !== existingNote ? `Note updated to: ${note}` : 
+                    current_status !== existingStatus ? `Status updated${note ? ` with note: ${note}` : ""}` : 
+                    "Note updated via UI";
     await pool.query(
       `INSERT INTO audit_logs
        (order_id, action, from_status, to_status, employee_name, user_role, colour_code, remarks)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
-        orderId,
-        "Status Changed",
-        oldStatus,
-        newStatus,
-        employeeName,
-        userRole,
+        id,
+        action,
+        current_status !== existingStatus ? existingStatus : "N/A",
+        current_status !== existingStatus ? current_status : "N/A",
+        assigned_employee || null,
+        userRole || "Unknown",
         colour_code || null,
-        note ? `Status updated with note: ${note}` : "Status updated via UI"
+        remarks
       ]
     );
 
-    console.log(`✅ Order updated successfully: ${id} → ${current_status}`);
-    res.json({ message: `✅ Order status updated to ${current_status}` });
+    console.log(`✅ Order updated successfully: ${id} → ${action}`);
+    res.json({ message: `✅ Order ${action.toLowerCase()}` });
   } catch (error) {
     console.error("🚨 Error updating order:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-// Delete Order (Updated for Admin-only, Required Note)
+// Delete Order
 app.delete("/api/orders/:id", async (req, res) => {
   const { id } = req.params;
   const { userRole, note } = req.body;
 
   try {
-    // Check if user is Admin
     if (userRole !== "Admin") {
       console.warn(`❌ Unauthorized deletion attempt by role: ${userRole}`);
       return res.status(403).json({ error: "Only Admins can delete orders" });
     }
 
-    // Check if note is provided
     if (!note || note.trim() === "") {
       console.warn("❌ Deletion attempt without note");
       return res.status(400).json({ error: "A note is required to delete an order" });
     }
 
-    // Check if order exists and is in Waiting or Active state
     const check = await pool.query(
       "SELECT current_status FROM orders2 WHERE transaction_id = $1 AND deleted = FALSE",
       [id]
@@ -305,7 +315,6 @@ app.delete("/api/orders/:id", async (req, res) => {
 
     console.log(`🛠 Deleting order: ${id} with note: ${note}`);
 
-    // Move to deleted_orders
     await pool.query(
       `INSERT INTO deleted_orders (
         transaction_id, customer_name, client_contact, assigned_employee,
@@ -320,13 +329,11 @@ app.delete("/api/orders/:id", async (req, res) => {
       [id, note]
     );
 
-    // Mark as deleted in orders2
     await pool.query(
       `UPDATE orders2 SET deleted = TRUE WHERE transaction_id = $1`,
       [id]
     );
 
-    // Log to audit_logs
     await pool.query(
       `INSERT INTO audit_logs
        (order_id, action, from_status, to_status, employee_name, user_role, remarks)
@@ -416,7 +423,7 @@ app.delete("/api/staff/:code", async (req, res) => {
   }
 });
 
-// Verify Employee Code (Original endpoint)
+// Verify Employee Code
 app.get("/api/employees", async (req, res) => {
   try {
     const { code } = req.query;
