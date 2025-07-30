@@ -268,12 +268,44 @@ app.put("/api/orders/:id", async (req, res) => {
   }
 });
 
-// Delete Order
+// Delete Order (Updated for Admin-only, Required Note)
 app.delete("/api/orders/:id", async (req, res) => {
   const { id } = req.params;
-  try {
-    console.log(`🛠 Deleting order: ${id}`);
+  const { userRole, note } = req.body;
 
+  try {
+    // Check if user is Admin
+    if (userRole !== "Admin") {
+      console.warn(`❌ Unauthorized deletion attempt by role: ${userRole}`);
+      return res.status(403).json({ error: "Only Admins can delete orders" });
+    }
+
+    // Check if note is provided
+    if (!note || note.trim() === "") {
+      console.warn("❌ Deletion attempt without note");
+      return res.status(400).json({ error: "A note is required to delete an order" });
+    }
+
+    // Check if order exists and is in Waiting or Active state
+    const check = await pool.query(
+      "SELECT current_status FROM orders2 WHERE transaction_id = $1 AND deleted = FALSE",
+      [id]
+    );
+    if (check.rows.length === 0) {
+      console.warn(`❌ Order not found: ${id}`);
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const { current_status } = check.rows[0];
+    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing"];
+    if (!validStatuses.includes(current_status)) {
+      console.warn(`❌ Invalid status for deletion: ${current_status}`);
+      return res.status(400).json({ error: "Only Waiting or Active orders can be deleted" });
+    }
+
+    console.log(`🛠 Deleting order: ${id} with note: ${note}`);
+
+    // Move to deleted_orders
     await pool.query(
       `INSERT INTO deleted_orders (
         transaction_id, customer_name, client_contact, assigned_employee,
@@ -282,19 +314,24 @@ app.delete("/api/orders/:id", async (req, res) => {
       )
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time,
-             paint_quantity, order_type, category, note
+             paint_quantity, order_type, category, $2
       FROM orders2
       WHERE transaction_id = $1`,
+      [id, note]
+    );
+
+    // Mark as deleted in orders2
+    await pool.query(
+      `UPDATE orders2 SET deleted = TRUE WHERE transaction_id = $1`,
       [id]
     );
 
-    await pool.query(`DELETE FROM orders2 WHERE transaction_id = $1`, [id]);
-
+    // Log to audit_logs
     await pool.query(
       `INSERT INTO audit_logs
        (order_id, action, from_status, to_status, employee_name, user_role, remarks)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [id, "Order Deleted", "N/A", "Deleted", null, req.body.userRole || "Unknown", "Order deleted by admin"]
+      [id, "Order Deleted", current_status, "Deleted", null, userRole, `Order deleted with note: ${note}`]
     );
 
     console.log(`✅ Order ${id} deleted successfully`);
