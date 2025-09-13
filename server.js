@@ -37,10 +37,12 @@ app.get("/api/orders/search", async (req, res) => {
   try {
     console.log("🔍 Searching orders with query:", q);
     const result = await pool.query(`
-      SELECT *
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time,
+             paint_quantity, order_type, category, note, po_type
       FROM orders2
       ORDER BY 1 DESC
-    `);
+    `); // Updated: Added po_type to SELECT
     console.log("✅ Search returned:", result.rows.length, "orders");
     res.json(result.rows);
   } catch (err) {
@@ -76,7 +78,7 @@ app.get("/api/orders", async (req, res) => {
     const result = await pool.query(`
       SELECT o.transaction_id, o.customer_name, o.client_contact, o.assigned_employee,
              o.current_status, o.colour_code, o.paint_type, o.start_time,
-             o.paint_quantity, o.order_type, o.category, o.note,
+             o.paint_quantity, o.order_type, o.category, o.note, o.po_type,
              h.entered_at AS status_started_at
       FROM orders2 o
       LEFT JOIN LATERAL (
@@ -91,7 +93,7 @@ app.get("/api/orders", async (req, res) => {
       AND o.deleted = FALSE
       ORDER BY o.current_status DESC
       LIMIT 20
-    `);
+    `); // Updated: Added po_type to SELECT
     console.log("✅ Active orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
@@ -105,8 +107,12 @@ app.get("/api/orders/active", async (req, res) => {
   try {
     console.log("🛠 Fetching active orders (Mixing, Waiting, Pending)...");
     const result = await pool.query(
-      "SELECT * FROM orders2 WHERE current_status IN ('Mixing', 'Waiting', 'Pending')"
-    );
+      `SELECT transaction_id, customer_name, client_contact, assigned_employee,
+              current_status, colour_code, paint_type, start_time,
+              paint_quantity, order_type, category, note, po_type
+       FROM orders2 
+       WHERE current_status IN ('Mixing', 'Waiting', 'Pending')`
+    ); // Updated: Added po_type to SELECT
     console.log("✅ Active orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (error) {
@@ -122,11 +128,11 @@ app.get("/api/orders/archived", async (req, res) => {
     const result = await pool.query(`
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time,
-             paint_quantity, order_type, category, note
+             paint_quantity, order_type, category, note, po_type
       FROM orders2
       WHERE archived = TRUE
       ORDER BY start_time DESC
-    `);
+    `); // Updated: Added po_type to SELECT
     console.log("✅ Archived orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
@@ -142,10 +148,10 @@ app.get("/api/orders/deleted", async (req, res) => {
     const result = await pool.query(`
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time,
-             paint_quantity, order_type, category, note
+             paint_quantity, order_type, category, note, po_type
       FROM deleted_orders
       ORDER BY start_time DESC
-    `);
+    `); // Updated: Added po_type to SELECT
     console.log("✅ Deleted orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
@@ -167,6 +173,7 @@ app.post("/api/orders", async (req, res) => {
       paint_quantity,
       current_status,
       order_type,
+      po_type, // New: Destructure po_type
       note
     } = req.body;
 
@@ -176,6 +183,10 @@ app.post("/api/orders", async (req, res) => {
     if (!colour_code || colour_code.trim() === "") {
       colour_code = "N/A";
     }
+    // New: Validate po_type for Paid orders
+    if (order_type === "Paid" && !["Nexa", "Carvello"].includes(po_type)) {
+      return res.status(400).json({ error: "❌ PO Type must be 'Nexa' or 'Carvello' for Paid orders" });
+    }
 
     const start_time = new Date().toISOString();
     console.log("🛠 Adding new order:", req.body);
@@ -184,12 +195,12 @@ app.post("/api/orders", async (req, res) => {
       `INSERT INTO orders2 (
         transaction_id, customer_name, client_contact, paint_type, 
         colour_code, category, paint_quantity, current_status, 
-        order_type, start_time, note, archived, deleted
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, FALSE, FALSE)`,
+        order_type, start_time, note, archived, deleted, po_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, FALSE, FALSE, $12)`,
       [
         transaction_id, customer_name, client_contact, paint_type,
         colour_code, category, paint_quantity, current_status,
-        order_type, start_time, note || null
+        order_type, start_time, note || null, po_type || null // New: Include po_type
       ]
     );
 
@@ -207,7 +218,7 @@ app.post("/api/orders", async (req, res) => {
 // Update Order Status
 app.put("/api/orders/:id", async (req, res) => {
   try {
-    let { current_status, assigned_employee, colour_code, note, old_status, userRole } = req.body;
+    let { current_status, assigned_employee, colour_code, note, old_status, userRole, po_type } = req.body; // New: Destructure po_type
     const { id } = req.params;
 
     const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
@@ -225,22 +236,22 @@ app.put("/api/orders/:id", async (req, res) => {
 
     // Fetch current order to check if status changed
     const currentOrder = await pool.query(
-      "SELECT current_status, note FROM orders2 WHERE transaction_id = $1",
+      "SELECT current_status, note, po_type FROM orders2 WHERE transaction_id = $1",
       [id]
-    );
+    ); // Updated: Added po_type to SELECT
     if (currentOrder.rows.length === 0) {
       return res.status(404).json({ error: "Order not found" });
     }
-    const { current_status: existingStatus, note: existingNote } = currentOrder.rows[0];
+    const { current_status: existingStatus, note: existingNote, po_type: existingPoType } = currentOrder.rows[0];
 
-    console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code, note });
+    console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code, note, po_type });
 
     // Update orders2
     await pool.query(
       `UPDATE orders2
-       SET current_status = $1, colour_code = $2, assigned_employee = $3, note = $4
-       WHERE transaction_id = $5`,
-      [current_status, colour_code || "Pending", assigned_employee, note || null, id]
+       SET current_status = $1, colour_code = $2, assigned_employee = $3, note = $4, po_type = $5
+       WHERE transaction_id = $6`,
+      [current_status, colour_code || "Pending", assigned_employee, note || null, po_type || existingPoType || null, id] // New: Include po_type
     );
 
     // Only insert into order_status_history if status changed
@@ -298,15 +309,15 @@ app.delete("/api/orders/:id", async (req, res) => {
     }
 
     const check = await pool.query(
-      "SELECT current_status FROM orders2 WHERE transaction_id = $1 AND deleted = FALSE",
+      "SELECT current_status, po_type FROM orders2 WHERE transaction_id = $1 AND deleted = FALSE",
       [id]
-    );
+    ); // Updated: Added po_type to SELECT
     if (check.rows.length === 0) {
       console.warn(`❌ Order not found: ${id}`);
       return res.status(404).json({ error: "Order not found" });
     }
 
-    const { current_status } = check.rows[0];
+    const { current_status, po_type } = check.rows[0];
     const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing"];
     if (!validStatuses.includes(current_status)) {
       console.warn(`❌ Invalid status for deletion: ${current_status}`);
@@ -319,15 +330,15 @@ app.delete("/api/orders/:id", async (req, res) => {
       `INSERT INTO deleted_orders (
         transaction_id, customer_name, client_contact, assigned_employee,
         current_status, colour_code, paint_type, start_time,
-        paint_quantity, order_type, category, note
+        paint_quantity, order_type, category, note, po_type
       )
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time,
-             paint_quantity, order_type, category, $2
+             paint_quantity, order_type, category, $2, po_type
       FROM orders2
       WHERE transaction_id = $1`,
       [id, note]
-    );
+    ); // Updated: Added po_type to INSERT and SELECT
 
     await pool.query(
       `UPDATE orders2 SET deleted = TRUE WHERE transaction_id = $1`,
@@ -448,11 +459,11 @@ app.get("/api/orders/admin", async (req, res) => {
     const result = await pool.query(`
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time, paint_quantity, 
-             order_type, category, note
+             order_type, category, note, po_type
       FROM orders2
       WHERE current_status = 'Ready' AND order_type IN ('Order', 'Paid')
       ORDER BY start_time DESC
-    `);
+    `); // Updated: Added po_type to SELECT
     console.log("✅ Ready orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (error) {
