@@ -31,556 +31,501 @@ app.use((req, res, next) => {
   next();
 });
 
-// Create new order
-app.post("/api/orders", async (req, res) => {
-  const {
-    transaction_id,
-    customer_name,
-    client_contact,
-    paint_type,
-    colour_code,
-    category,
-    paint_quantity,
-    current_status,
-    order_type,
-    po_type,
-    start_time
-  } = req.body;
-  console.log("🛠 Creating new order:", { transaction_id, customer_name, client_contact, po_type });
-
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      // Validate required fields
-      if (!transaction_id || !customer_name || !client_contact || !paint_type || !category || !paint_quantity || !current_status || !order_type || !start_time) {
-        throw new Error("Missing required fields");
-      }
-      if (order_type === "Paid" && !po_type) {
-        throw new Error("PO type (Nexa or Carvello) required for Paid orders");
-      }
-
-      // Check for duplicate transaction_id
-      const existingOrder = await client.query(
-        "SELECT transaction_id FROM orders2 WHERE transaction_id = $1",
-        [transaction_id]
-      );
-      if (existingOrder.rows.length > 0) {
-        throw new Error(`Transaction ID ${transaction_id} already exists`);
-      }
-
-      const result = await client.query(
-        `INSERT INTO orders2 (
-          transaction_id, customer_name, client_contact, paint_type, colour_code, 
-          category, paint_quantity, current_status, order_type, po_type, start_time
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
-        [
-          transaction_id,
-          customer_name,
-          client_contact,
-          paint_type,
-          colour_code || "N/A",
-          category,
-          paint_quantity,
-          current_status,
-          order_type,
-          po_type || null, // Store null for non-Paid orders
-          start_time
-        ]
-      );
-
-      await client.query(
-        "INSERT INTO audit_logs (order_id, action, to_status, employee_name, user_role, remarks) VALUES ($1, $2, $3, $4, $5, $6)",
-        [transaction_id, "Order Created", current_status, "System", "System", `Order added via AddOrderC form, PO Type: ${po_type || "N/A"}`]
-      );
-
-      await client.query("COMMIT");
-      console.log("✅ Order created:", result.rows[0]);
-      res.json(result.rows[0]);
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error("🚨 Error creating order:", err);
-    res.status(400).json({ error: "Failed to create order", message: err.message });
-  }
-});
-
-// Check transaction ID
-app.get("/api/orders/check-id/:id", async (req, res) => {
-  const { id } = req.params;
-  console.log("🛠 Checking transaction ID:", { id });
-
-  try {
-    const result = await pool.query(
-      "SELECT transaction_id FROM orders2 WHERE transaction_id = $1",
-      [id]
-    );
-    res.json({ exists: result.rows.length > 0 });
-  } catch (err) {
-    console.error("🚨 Error checking transaction ID:", err);
-    res.status(500).json({ error: "Failed to check transaction ID" });
-  }
-});
-
-// Search orders
+// Search Orders
 app.get("/api/orders/search", async (req, res) => {
   const { q } = req.query;
-  console.log("🛠 Searching orders:", { query: q });
-
   try {
-    const result = await pool.query(
-      `SELECT * FROM orders2 
-       WHERE deleted = FALSE 
-       AND (transaction_id ILIKE $1 
-            OR customer_name ILIKE $1 
-            OR client_contact ILIKE $1) 
-       ORDER BY start_time DESC`,
-      [`%${q || ""}%`]
-    );
+    console.log("🔍 Searching orders with query:", q);
+    const result = await pool.query(`
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time,
+             paint_quantity, order_type, category, note, po_type
+      FROM orders2
+      ORDER BY 1 DESC
+    `); // Updated: Added po_type to SELECT
+    console.log("✅ Search returned:", result.rows.length, "orders");
     res.json(result.rows);
   } catch (err) {
-    console.error("🚨 Error searching orders:", err);
-    res.status(500).json({ error: "Failed to search orders" });
+    console.error("🚨 Search failed:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Fetch all orders
+// Check Transaction ID
+app.get("/api/orders/check-id/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    console.log("🔍 Checking transaction ID:", id);
+    const result = await pool.query("SELECT 1 FROM orders2 WHERE transaction_id = $1", [id]);
+    if (result.rowCount > 0) {
+      console.log("⚠️ Transaction ID exists");
+      return res.status(409).json({ exists: true });
+    } else {
+      console.log("✅ Transaction ID available");
+      return res.status(200).json({ exists: false });
+    }
+  } catch (error) {
+    console.error("❌ Error checking transaction ID:", error.message);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Fetch Active Orders
 app.get("/api/orders", async (req, res) => {
   try {
-    console.log("🛠 Fetching all orders");
-    const result = await pool.query("SELECT * FROM orders2 WHERE deleted = FALSE ORDER BY start_time DESC");
+    console.log("🛠 Fetching latest orders...");
+    await pool.query("DISCARD ALL");
+    const result = await pool.query(`
+      SELECT o.transaction_id, o.customer_name, o.client_contact, o.assigned_employee,
+             o.current_status, o.colour_code, o.paint_type, o.start_time,
+             o.paint_quantity, o.order_type, o.category, o.note, o.po_type,
+             h.entered_at AS status_started_at
+      FROM orders2 o
+      LEFT JOIN LATERAL (
+        SELECT entered_at
+        FROM order_status_history
+        WHERE transaction_id = o.transaction_id AND status = o.current_status
+        ORDER BY entered_at DESC
+        LIMIT 1
+      ) h ON true
+      WHERE o.current_status NOT IN ('Ready', 'Complete')
+      AND o.archived = FALSE
+      AND o.deleted = FALSE
+      ORDER BY o.current_status DESC
+      LIMIT 20
+    `); // Updated: Added po_type to SELECT
+    console.log("✅ Active orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching orders:", err);
-    res.status(500).json({ error: "Failed to fetch orders" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Fetch archived orders
+// Fetch Active Orders (Original /api/orders/active)
+app.get("/api/orders/active", async (req, res) => {
+  try {
+    console.log("🛠 Fetching active orders (Mixing, Waiting, Pending)...");
+    const result = await pool.query(
+      `SELECT transaction_id, customer_name, client_contact, assigned_employee,
+              current_status, colour_code, paint_type, start_time,
+              paint_quantity, order_type, category, note, po_type
+       FROM orders2 
+       WHERE current_status IN ('Mixing', 'Waiting', 'Pending')`
+    ); // Updated: Added po_type to SELECT
+    console.log("✅ Active orders fetched:", result.rows.length);
+    res.json(result.rows);
+  } catch (error) {
+    console.error("🚨 Error fetching active orders:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Fetch Archived Orders
 app.get("/api/orders/archived", async (req, res) => {
   try {
-    console.log("🛠 Fetching archived orders");
-    const result = await pool.query("SELECT * FROM orders2 WHERE archived = TRUE AND deleted = FALSE ORDER BY start_time DESC");
+    console.log("🛠 Fetching archived orders...");
+    const result = await pool.query(`
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time,
+             paint_quantity, order_type, category, note, po_type
+      FROM orders2
+      WHERE archived = TRUE
+      ORDER BY start_time DESC
+    `); // Updated: Added po_type to SELECT
+    console.log("✅ Archived orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching archived orders:", err);
-    res.status(500).json({ error: "Failed to fetch archived orders" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Update order status
-app.put("/api/orders/:id/status", async (req, res) => {
-  const { id } = req.params;
-  const { status, employeeCode, colourCode, employeeName, userRole, remarks } = req.body;
-  console.log("🛠 Updating order status:", { id, status, employeeCode, colourCode, employeeName, userRole, remarks });
-
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      const updateOrder = await client.query(
-        "UPDATE orders2 SET current_status = $1, assigned_employee = $2, assigned_employee_code = $3, colour_code = $4 WHERE id = $5 RETURNING *",
-        [status, employeeName, employeeCode, colourCode, id]
-      );
-
-      if (updateOrder.rows.length === 0) {
-        throw new Error("Order not found");
-      }
-
-      await client.query(
-        "INSERT INTO audit_logs (order_id, action, from_status, to_status, employee_name, user_role, colour_code, remarks) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-        [updateOrder.rows[0].transaction_id, "Status Changed", updateOrder.rows[0].current_status, status, employeeName, userRole, colourCode, remarks]
-      );
-
-      await client.query("COMMIT");
-      console.log("✅ Order status updated:", updateOrder.rows[0]);
-      res.json(updateOrder.rows[0]);
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error("🚨 Error updating order status:", err);
-    res.status(500).json({ error: "Failed to update order status" });
-  }
-});
-
-// Update order note
-app.put("/api/orders/:id/note", async (req, res) => {
-  const { id } = req.params;
-  const { note, employeeName, userRole } = req.body;
-  console.log("🛠 Updating order note:", { id, note, employeeName, userRole });
-
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      const updateOrder = await client.query(
-        "UPDATE orders2 SET note = $1 WHERE id = $2 RETURNING *",
-        [note, id]
-      );
-
-      if (updateOrder.rows.length === 0) {
-        throw new Error("Order not found");
-      }
-
-      await client.query(
-        "INSERT INTO audit_logs (order_id, action, employee_name, user_role, remarks) VALUES ($1, $2, $3, $4, $5)",
-        [updateOrder.rows[0].transaction_id, "Note Updated", employeeName, userRole, note]
-      );
-
-      await client.query("COMMIT");
-      console.log("✅ Order note updated:", updateOrder.rows[0]);
-      res.json(updateOrder.rows[0]);
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error("🚨 Error updating order note:", err);
-    res.status(500).json({ error: "Failed to update order note" });
-  }
-});
-
-// Cancel order
-app.put("/api/orders/:id/cancel", async (req, res) => {
-  const { id } = req.params;
-  const { reason, employeeName, userRole } = req.body;
-  console.log("🛠 Cancelling order:", { id, reason, employeeName, userRole });
-
-  try {
-    const client = await pool.connect();
-    try {
-      await client.query("BEGIN");
-
-      const order = await client.query("SELECT * FROM orders2 WHERE id = $1", [id]);
-      if (order.rows.length === 0) {
-        throw new Error("Order not found");
-      }
-
-      await client.query(
-        "INSERT INTO deleted_orders (transaction_id, customer_name, client_contact, paint_type, colour_code, category, current_status, order_type, paint_quantity, po_type, note, assigned_employee, start_time) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
-        [
-          order.rows[0].transaction_id,
-          order.rows[0].customer_name,
-          order.rows[0].client_contact,
-          order.rows[0].paint_type,
-          order.rows[0].colour_code,
-          order.rows[0].category,
-          order.rows[0].current_status,
-          order.rows[0].order_type,
-          order.rows[0].paint_quantity,
-          order.rows[0].po_type,
-          order.rows[0].note,
-          order.rows[0].assigned_employee,
-          order.rows[0].start_time
-        ]
-      );
-
-      await client.query(
-        "INSERT INTO audit_logs (order_id, action, employee_name, user_role, remarks) VALUES ($1, $2, $3, $4, $5)",
-        [order.rows[0].transaction_id, "Order Deleted", employeeName, userRole, reason]
-      );
-
-      const updateOrder = await client.query(
-        "UPDATE orders2 SET deleted = TRUE WHERE id = $1 RETURNING *",
-        [id]
-      );
-
-      await client.query("COMMIT");
-      console.log("✅ Order cancelled:", updateOrder.rows[0]);
-      res.json(updateOrder.rows[0]);
-    } catch (err) {
-      await client.query("ROLLBACK");
-      throw err;
-    } finally {
-      client.release();
-    }
-  } catch (err) {
-    console.error("🚨 Error cancelling order:", err);
-    res.status(500).json({ error: "Failed to cancel order" });
-  }
-});
-
-// Fetch deleted orders
+// Fetch Deleted Orders
 app.get("/api/orders/deleted", async (req, res) => {
   try {
-    console.log("🛠 Fetching deleted orders");
-    const result = await pool.query("SELECT * FROM deleted_orders ORDER BY start_time DESC");
+    console.log("🛠 Fetching deleted orders...");
+    const result = await pool.query(`
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time,
+             paint_quantity, order_type, category, note, po_type
+      FROM deleted_orders
+      ORDER BY start_time DESC
+    `); // Updated: Added po_type to SELECT
+    console.log("✅ Deleted orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching deleted orders:", err);
-    res.status(500).json({ error: "Failed to fetch deleted orders" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Fetch all staff
+// Add New Order
+app.post("/api/orders", async (req, res) => {
+  try {
+    let {
+      transaction_id,
+      customer_name,
+      client_contact,
+      paint_type,
+      colour_code,
+      category,
+      paint_quantity,
+      current_status,
+      order_type,
+      po_type, // New: Destructure po_type
+      note
+    } = req.body;
+
+    if (category === "New Mix") {
+      colour_code = "Pending";
+    }
+    if (!colour_code || colour_code.trim() === "") {
+      colour_code = "N/A";
+    }
+    // New: Validate po_type for Paid orders
+    if (order_type === "Paid" && !["Nexa", "Carvello"].includes(po_type)) {
+      return res.status(400).json({ error: "❌ PO Type must be 'Nexa' or 'Carvello' for Paid orders" });
+    }
+
+    const start_time = new Date().toISOString();
+    console.log("🛠 Adding new order:", req.body);
+
+    await pool.query(
+      `INSERT INTO orders2 (
+        transaction_id, customer_name, client_contact, paint_type, 
+        colour_code, category, paint_quantity, current_status, 
+        order_type, start_time, note, archived, deleted, po_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, FALSE, FALSE, $12)`,
+      [
+        transaction_id, customer_name, client_contact, paint_type,
+        colour_code, category, paint_quantity, current_status,
+        order_type, start_time, note || null, po_type || null // New: Include po_type
+      ]
+    );
+
+    console.log("✅ Order added successfully!");
+    res.json({ message: "✅ Order added successfully!" });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: "❌ Duplicate Transaction ID! Please use a unique ID." });
+    }
+    console.error("🚨 Error adding order:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update Order Status
+app.put("/api/orders/:id", async (req, res) => {
+  try {
+    let { current_status, assigned_employee, colour_code, note, old_status, userRole, po_type } = req.body; // New: Destructure po_type
+    const { id } = req.params;
+
+    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
+    if (!validStatuses.includes(current_status)) {
+      return res.status(400).json({ error: "❌ Invalid status update!" });
+    }
+
+    if (current_status === "Ready" && (!colour_code || colour_code.trim() === "")) {
+      return res.status(400).json({ error: "❌ Colour Code is required to mark order as Ready!" });
+    }
+
+    if (current_status !== "Waiting" && (!assigned_employee || assigned_employee.trim() === "")) {
+      return res.status(400).json({ error: "❌ Employee must be assigned when updating order status!" });
+    }
+
+    // Fetch current order to check if status changed
+    const currentOrder = await pool.query(
+      "SELECT current_status, note, po_type FROM orders2 WHERE transaction_id = $1",
+      [id]
+    ); // Updated: Added po_type to SELECT
+    if (currentOrder.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    const { current_status: existingStatus, note: existingNote, po_type: existingPoType } = currentOrder.rows[0];
+
+    console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code, note, po_type });
+
+    // Update orders2
+    await pool.query(
+      `UPDATE orders2
+       SET current_status = $1, colour_code = $2, assigned_employee = $3, note = $4, po_type = $5
+       WHERE transaction_id = $6`,
+      [current_status, colour_code || "Pending", assigned_employee, note || null, po_type || existingPoType || null, id] // New: Include po_type
+    );
+
+    // Only insert into order_status_history if status changed
+    if (current_status !== existingStatus) {
+      await pool.query(
+        `INSERT INTO order_status_history (transaction_id, status)
+         VALUES ($1, $2)`,
+        [id, current_status]
+      );
+    }
+
+    // Log to audit_logs
+    const action = current_status !== existingStatus ? "Status Changed" : "Note Updated";
+    const remarks = note && note !== existingNote ? `Note updated to: ${note}` : 
+                    current_status !== existingStatus ? `Status updated${note ? ` with note: ${note}` : ""}` : 
+                    "Note updated via UI";
+    await pool.query(
+      `INSERT INTO audit_logs
+       (order_id, action, from_status, to_status, employee_name, user_role, colour_code, remarks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        id,
+        action,
+        current_status !== existingStatus ? existingStatus : "N/A",
+        current_status !== existingStatus ? current_status : "N/A",
+        assigned_employee || null,
+        userRole || "Unknown",
+        colour_code || null,
+        remarks
+      ]
+    );
+
+    console.log(`✅ Order updated successfully: ${id} → ${action}`);
+    res.json({ message: `✅ Order ${action.toLowerCase()}` });
+  } catch (error) {
+    console.error("🚨 Error updating order:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete Order
+app.delete("/api/orders/:id", async (req, res) => {
+  const { id } = req.params;
+  const { userRole, note } = req.body;
+
+  try {
+    if (userRole !== "Admin") {
+      console.warn(`❌ Unauthorized deletion attempt by role: ${userRole}`);
+      return res.status(403).json({ error: "Only Admins can delete orders" });
+    }
+
+    if (!note || note.trim() === "") {
+      console.warn("❌ Deletion attempt without note");
+      return res.status(400).json({ error: "A note is required to delete an order" });
+    }
+
+    const check = await pool.query(
+      "SELECT current_status, po_type FROM orders2 WHERE transaction_id = $1 AND deleted = FALSE",
+      [id]
+    ); // Updated: Added po_type to SELECT
+    if (check.rows.length === 0) {
+      console.warn(`❌ Order not found: ${id}`);
+      return res.status(404).json({ error: "Order not found" });
+    }
+
+    const { current_status, po_type } = check.rows[0];
+    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing"];
+    if (!validStatuses.includes(current_status)) {
+      console.warn(`❌ Invalid status for deletion: ${current_status}`);
+      return res.status(400).json({ error: "Only Waiting or Active orders can be deleted" });
+    }
+
+    console.log(`🛠 Deleting order: ${id} with note: ${note}`);
+
+    await pool.query(
+      `INSERT INTO deleted_orders (
+        transaction_id, customer_name, client_contact, assigned_employee,
+        current_status, colour_code, paint_type, start_time,
+        paint_quantity, order_type, category, note, po_type
+      )
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time,
+             paint_quantity, order_type, category, $2, po_type
+      FROM orders2
+      WHERE transaction_id = $1`,
+      [id, note]
+    ); // Updated: Added po_type to INSERT and SELECT
+
+    await pool.query(
+      `UPDATE orders2 SET deleted = TRUE WHERE transaction_id = $1`,
+      [id]
+    );
+
+    await pool.query(
+      `INSERT INTO audit_logs
+       (order_id, action, from_status, to_status, employee_name, user_role, remarks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, "Order Deleted", current_status, "Deleted", null, userRole, `Order deleted with note: ${note}`]
+    );
+
+    console.log(`✅ Order ${id} deleted successfully`);
+    res.json({ message: "✅ Order deleted successfully" });
+  } catch (error) {
+    console.error("🚨 Error deleting order:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Fetch Staff
 app.get("/api/staff", async (req, res) => {
   try {
-    console.log("🛠 Fetching all staff");
-    const result = await pool.query("SELECT * FROM employees ORDER BY employee_name");
+    console.log("🛠 Fetching staff list from employees table...");
+    const result = await pool.query("SELECT employee_name, employee_code AS code, role FROM employees");
+    console.log("✅ Staff list fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
     console.error("🚨 Error fetching staff:", err);
-    res.status(500).json({ error: "Failed to fetch staff" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-// Add new staff
+// Add Staff
 app.post("/api/staff", async (req, res) => {
-  const { employee_name, code, role } = req.body;
-  console.log("🛠 Adding new staff:", { employee_name, code, role });
-
   try {
-    const result = await pool.query(
-      "INSERT INTO employees (employee_name, employee_code, role) VALUES ($1, $2, $3) RETURNING *",
+    const { employee_name, code, role } = req.body;
+    if (!employee_name || !code || !role) {
+      return res.status(400).json({ error: "❌ Employee name, code, and role are required" });
+    }
+    console.log("🛠 Adding new staff to employees table:", req.body);
+    await pool.query(
+      `INSERT INTO employees (employee_name, employee_code, role)
+       VALUES ($1, $2, $3)`,
       [employee_name, code, role]
     );
-    console.log("✅ Staff added:", result.rows[0]);
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("🚨 Error adding staff:", err);
-    res.status(500).json({ error: "Failed to add staff" });
+    console.log("✅ Staff added successfully!");
+    res.json({ message: "✅ Staff added successfully!" });
+  } catch (error) {
+    if (error.code === '23505') {
+      return res.status(400).json({ error: "❌ Duplicate Employee Code! Please use a unique code." });
+    }
+    console.error("🚨 Error adding staff:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Update staff
-app.put("/api/staff/:id", async (req, res) => {
-  const { id } = req.params;
-  const { employee_name, code, role } = req.body;
-  console.log("🛠 Updating staff:", { id, employee_name, code, role });
-
+// Edit Staff
+app.put("/api/staff/:code", async (req, res) => {
   try {
-    const result = await pool.query(
-      "UPDATE employees SET employee_name = $1, employee_code = $2, role = $3 WHERE employee_id = $4 RETURNING *",
-      [employee_name, code, role, id]
+    const { code } = req.params;
+    const { employee_name, role } = req.body;
+    if (!employee_name || !role) {
+      return res.status(400).json({ error: "❌ Employee name and role are required" });
+    }
+    console.log("🛠 Updating staff in employees table:", { code, employee_name, role });
+    await pool.query(
+      `UPDATE employees
+       SET employee_name = $1, role = $2
+       WHERE employee_code = $3`,
+      [employee_name, role, code]
     );
+    console.log("✅ Staff updated successfully");
+    res.json({ message: "✅ Staff updated successfully" });
+  } catch (error) {
+    console.error("🚨 Error updating staff:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Remove Staff
+app.delete("/api/staff/:code", async (req, res) => {
+  try {
+    const { code } = req.params;
+    console.log(`🛠 Deleting staff from employees table: ${code}`);
+    await pool.query(`DELETE FROM employees WHERE employee_code = $1`, [code]);
+    console.log("✅ Staff deleted successfully");
+    res.json({ message: "✅ Staff deleted successfully" });
+  } catch (error) {
+    console.error("🚨 Error deleting staff:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Verify Employee Code
+app.get("/api/employees", async (req, res) => {
+  try {
+    const { code } = req.query;
+    console.log("🔍 Searching for Employee Code:", code);
+    const result = await pool.query("SELECT employee_name FROM employees WHERE TRIM(employee_code) = TRIM($1)", [code]);
     if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Staff not found" });
+      console.warn("❌ Invalid Employee Code!");
+      return res.status(404).json({ error: "Invalid Employee Code" });
     }
-    console.log("✅ Staff updated:", result.rows[0]);
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("🚨 Error updating staff:", err);
-    res.status(500).json({ error: "Failed to update staff" });
+    console.log("✅ Employee found:", result.rows[0].employee_name);
+    res.json({ employee_name: result.rows[0].employee_name });
+  } catch (error) {
+    console.error("🚨 Error fetching employee:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Delete staff
-app.delete("/api/staff/:id", async (req, res) => {
-  const { id } = req.params;
-  console.log("🛠 Deleting staff:", { id });
-
+// Fetch Ready Orders for Admin
+app.get("/api/orders/admin", async (req, res) => {
   try {
-    const result = await pool.query("DELETE FROM employees WHERE employee_id = $1 RETURNING *", [id]);
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Staff not found" });
-    }
-    console.log("✅ Staff deleted:", result.rows[0]);
-    res.json(result.rows[0]);
-  } catch (err) {
-    console.error("🚨 Error deleting staff:", err);
-    res.status(500).json({ error: "Failed to delete staff" });
-  }
-});
-
-// Fetch Order Report
-app.get("/api/orders/report", async (req, res) => {
-  try {
-    const { start_date, end_date, status, category, include_deleted } = req.query;
-    console.log("🛠 Generating order report with filters:", { start_date, end_date, status, category, include_deleted });
-
-    // Validate inputs
-    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
-      return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
-    }
-    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
-      return res.status(400).json({ error: "Invalid end_date format. Use YYYY-MM-DD." });
-    }
-    if (start_date && end_date && new Date(start_date) > new Date(end_date)) {
-      return res.status(400).json({ error: "start_date cannot be after end_date." });
-    }
-    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete", "All"];
-    if (status && !validStatuses.includes(status)) {
-      return res.status(400).json({ error: "Invalid status value." });
-    }
-
-    // Build query for orders2
-    let queryConditions = [];
-    let queryParams = [];
-    let paramIndex = 1;
-
-    queryConditions.push(`deleted = FALSE`);
-
-    if (start_date) {
-      queryConditions.push(`start_time >= $${paramIndex}`);
-      queryParams.push(start_date);
-      paramIndex++;
-    }
-    if (end_date) {
-      queryConditions.push(`start_time <= $${paramIndex}::date + INTERVAL '1 day'`);
-      queryParams.push(end_date);
-      paramIndex++;
-    }
-    if (status && status !== "All") {
-      queryConditions.push(`current_status = $${paramIndex}`);
-      queryParams.push(status);
-      paramIndex++;
-    }
-    if (category && category !== "All") {
-      queryConditions.push(`category = $${paramIndex}`);
-      queryParams.push(category);
-      paramIndex++;
-    }
-
-    const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(" AND ")}` : "";
-
-    // Status Summary
-    const statusResult = await pool.query(`
-      SELECT current_status, COUNT(*) as count
+    console.log("🛠 Fetching Ready orders for Admin...");
+    const result = await pool.query(`
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time, paint_quantity, 
+             order_type, category, note, po_type
       FROM orders2
-      ${whereClause}
-      GROUP BY current_status
-    `, queryParams);
-
-    // Category Summary
-    const categoryResult = await pool.query(`
-      SELECT category, COUNT(*) as count
-      FROM orders2
-      ${whereClause}
-      GROUP BY category
-    `, queryParams);
-
-    // History Summary (from audit_logs)
-    let historyConditions = [];
-    let historyParams = [];
-    let historyIndex = 1;
-
-    if (start_date) {
-      historyConditions.push(`timestamp >= $${historyIndex}`);
-      historyParams.push(start_date);
-      historyIndex++;
-    }
-    if (end_date) {
-      historyConditions.push(`timestamp <= $${historyIndex}::date + INTERVAL '1 day'`);
-      historyParams.push(end_date);
-      historyIndex++;
-    }
-    if (status && status !== "All") {
-      historyConditions.push(`to_status = $${historyIndex}`);
-      historyParams.push(status);
-      historyIndex++;
-    }
-
-    const historyWhereClause = historyConditions.length > 0 ? `WHERE ${historyConditions.join(" AND ")}` : "";
-
-    let historySummary = {};
-    try {
-      const historyResult = await pool.query(`
-        SELECT action, COUNT(*) as count
-        FROM audit_logs
-        ${historyWhereClause}
-        GROUP BY action
-      `, historyParams);
-      historySummary = historyResult.rows.reduce((acc, row) => {
-        acc[row.action] = parseInt(row.count, 10);
-        return acc;
-      }, {});
-    } catch (err) {
-      console.warn("⚠️ Audit logs query failed, returning empty history:", err.message);
-      historySummary = { "No audit data": 0 };
-    }
-
-    // Include deleted orders if requested
-    let deletedSummary = {};
-    if (include_deleted === "true") {
-      let deletedConditions = [];
-      let deletedParams = [];
-      let deletedIndex = 1;
-
-      if (start_date) {
-        deletedConditions.push(`start_time >= $${deletedIndex}`);
-        deletedParams.push(start_date);
-        deletedIndex++;
-      }
-      if (end_date) {
-        deletedConditions.push(`start_time <= $${deletedIndex}::date + INTERVAL '1 day'`);
-        deletedParams.push(end_date);
-        deletedIndex++;
-      }
-      if (status && status !== "All") {
-        deletedConditions.push(`current_status = $${deletedIndex}`);
-        deletedParams.push(status);
-        deletedIndex++;
-      }
-      if (category && category !== "All") {
-        deletedConditions.push(`category = $${deletedIndex}`);
-        deletedParams.push(category);
-        deletedIndex++;
-      }
-
-      const deletedWhereClause = deletedConditions.length > 0 ? `WHERE ${deletedConditions.join(" AND ")}` : "";
-
-      const deletedResult = await pool.query(`
-        SELECT current_status, COUNT(*) as count
-        FROM deleted_orders
-        ${deletedWhereClause}
-        GROUP BY current_status
-      `, deletedParams);
-
-      deletedSummary = deletedResult.rows.reduce((acc, row) => {
-        acc[row.current_status] = parseInt(row.count, 10);
-        return acc;
-      }, {});
-    }
-
-    const statusSummary = statusResult.rows.reduce((acc, row) => {
-      acc[row.current_status] = parseInt(row.count, 10);
-      return acc;
-    }, {});
-
-    const categorySummary = categoryResult.rows.reduce((acc, row) => {
-      acc[row.category] = parseInt(row.count, 10);
-      return acc;
-    }, {});
-
-    console.log("✅ Report generated:", { statusSummary, categorySummary, historySummary, deletedSummary });
-    res.json({
-      statusSummary,
-      categorySummary,
-      historySummary,
-      deletedSummary
-    });
-  } catch (err) {
-    console.error("🚨 Error generating report:", err);
-    res.status(500).json({ error: "Failed to generate report" });
-  }
-});
-
-// Fetch audit logs
-app.get("/api/audit_logs", async (req, res) => {
-  try {
-    console.log("🛠 Fetching audit logs");
-    const result = await pool.query("SELECT * FROM audit_logs ORDER BY timestamp DESC");
+      WHERE current_status = 'Ready' AND order_type IN ('Order', 'Paid')
+      ORDER BY start_time DESC
+    `); // Updated: Added po_type to SELECT
+    console.log("✅ Ready orders fetched:", result.rows.length);
     res.json(result.rows);
-  } catch (err) {
-    console.error("🚨 Error fetching audit logs:", err);
-    res.status(500).json({ error: "Failed to fetch audit logs" });
+  } catch (error) {
+    console.error("🚨 Error fetching Ready orders:", error);
+    res.status(500).json({ error: error.message });
   }
 });
 
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+// Mark Order as Paid/Complete
+app.put("/api/orders/mark-paid/:id", async (req, res) => {
+  try {
+    const { userRole } = req.body;
+    const { id } = req.params;
+    if (userRole !== "Admin") {
+      return res.status(403).json({ error: "Only Admins can mark orders as Paid" });
+    }
+    const check = await pool.query(
+      "SELECT order_type, current_status FROM orders2 WHERE transaction_id = $1",
+      [id]
+    );
+    if (check.rows.length === 0) {
+      return res.status(404).json({ error: "Order not found" });
+    }
+    const order = check.rows[0];
+    if (order.current_status !== "Ready") {
+      return res.status(400).json({ error: "Only 'Ready' orders can be marked as Complete" });
+    }
+    await pool.query(
+      "UPDATE orders2 SET current_status = 'Complete' WHERE transaction_id = $1",
+      [id]
+    );
+    console.log(`✅ Order ${id} marked as Complete`);
+    res.json({ message: "✅ Order marked as Complete" });
+  } catch (error) {
+    console.error("🚨 Error marking as Complete:", error.message);
+    res.status(500).json({ error: error.message });
+  }
 });
+
+// Archive Old Waiting Orders
+app.put("/api/orders/archive-old", async (req, res) => {
+  try {
+    console.log("🛠 Archiving old orders...");
+    const result = await pool.query(`
+      UPDATE orders2
+      SET archived = TRUE
+      WHERE current_status = 'Waiting'
+      AND archived = FALSE
+      AND COALESCE(start_time) < NOW() - INTERVAL '21 days'
+    `);
+    console.log(`✅ ${result.rowCount} orders archived`);
+    res.json({ message: `✅ ${result.rowCount} orders archived` });
+  } catch (err) {
+    console.error("❌ Archiving failed:", err.message);
+    res.status(500).json({ error: "Failed to archive old orders" });
+  }
+});
+
+// Health Check
+app.get("/", (req, res) => {
+  res.send("🚀 Backend is alive!");
+});
+
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
