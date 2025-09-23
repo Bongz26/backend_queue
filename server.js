@@ -31,6 +31,124 @@ app.use((req, res, next) => {
   next();
 });
 
+// Create new order
+app.post("/api/orders", async (req, res) => {
+  const {
+    transaction_id,
+    customer_name,
+    client_contact,
+    paint_type,
+    colour_code,
+    category,
+    paint_quantity,
+    current_status,
+    order_type,
+    po_type,
+    start_time
+  } = req.body;
+  console.log("🛠 Creating new order:", { transaction_id, customer_name, client_contact, po_type });
+
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Validate required fields
+      if (!transaction_id || !customer_name || !client_contact || !paint_type || !category || !paint_quantity || !current_status || !order_type || !start_time) {
+        throw new Error("Missing required fields");
+      }
+      if (order_type === "Paid" && !po_type) {
+        throw new Error("PO type (Nexa or Carvello) required for Paid orders");
+      }
+
+      // Check for duplicate transaction_id
+      const existingOrder = await client.query(
+        "SELECT transaction_id FROM orders2 WHERE transaction_id = $1",
+        [transaction_id]
+      );
+      if (existingOrder.rows.length > 0) {
+        throw new Error(`Transaction ID ${transaction_id} already exists`);
+      }
+
+      const result = await client.query(
+        `INSERT INTO orders2 (
+          transaction_id, customer_name, client_contact, paint_type, colour_code, 
+          category, paint_quantity, current_status, order_type, po_type, start_time
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+        [
+          transaction_id,
+          customer_name,
+          client_contact,
+          paint_type,
+          colour_code || "N/A",
+          category,
+          paint_quantity,
+          current_status,
+          order_type,
+          po_type || null, // Store null for non-Paid orders
+          start_time
+        ]
+      );
+
+      await client.query(
+        "INSERT INTO audit_logs (order_id, action, to_status, employee_name, user_role, remarks) VALUES ($1, $2, $3, $4, $5, $6)",
+        [transaction_id, "Order Created", current_status, "System", "System", `Order added via AddOrderC form, PO Type: ${po_type || "N/A"}`]
+      );
+
+      await client.query("COMMIT");
+      console.log("✅ Order created:", result.rows[0]);
+      res.json(result.rows[0]);
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error("🚨 Error creating order:", err);
+    res.status(400).json({ error: "Failed to create order", message: err.message });
+  }
+});
+
+// Check transaction ID
+app.get("/api/orders/check-id/:id", async (req, res) => {
+  const { id } = req.params;
+  console.log("🛠 Checking transaction ID:", { id });
+
+  try {
+    const result = await pool.query(
+      "SELECT transaction_id FROM orders2 WHERE transaction_id = $1",
+      [id]
+    );
+    res.json({ exists: result.rows.length > 0 });
+  } catch (err) {
+    console.error("🚨 Error checking transaction ID:", err);
+    res.status(500).json({ error: "Failed to check transaction ID" });
+  }
+});
+
+// Search orders
+app.get("/api/orders/search", async (req, res) => {
+  const { q } = req.query;
+  console.log("🛠 Searching orders:", { query: q });
+
+  try {
+    const result = await pool.query(
+      `SELECT * FROM orders2 
+       WHERE deleted = FALSE 
+       AND (transaction_id ILIKE $1 
+            OR customer_name ILIKE $1 
+            OR client_contact ILIKE $1) 
+       ORDER BY start_time DESC`,
+      [`%${q || ""}%`]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("🚨 Error searching orders:", err);
+    res.status(500).json({ error: "Failed to search orders" });
+  }
+});
+
 // Fetch all orders
 app.get("/api/orders", async (req, res) => {
   try {
@@ -438,70 +556,31 @@ app.get("/api/orders/report", async (req, res) => {
     }, {});
 
     console.log("✅ Report generated:", { statusSummary, categorySummary, historySummary, deletedSummary });
-    res.json({ statusSummary, categorySummary, historySummary, deletedSummary });
+    res.json({
+      statusSummary,
+      categorySummary,
+      historySummary,
+      deletedSummary
+    });
   } catch (err) {
-    console.error("🚨 Error generating report:", err.stack);
-    res.status(500).json({ error: "Failed to generate report", details: err.message });
+    console.error("🚨 Error generating report:", err);
+    res.status(500).json({ error: "Failed to generate report" });
   }
 });
 
-// Fetch Detailed Audit Logs
+// Fetch audit logs
 app.get("/api/audit_logs", async (req, res) => {
   try {
-    const { start_date, end_date, status } = req.query;
-    console.log("🛠 Fetching audit logs with filters:", { start_date, end_date, status });
-
-    // Validate inputs
-    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
-      return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
-    }
-    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
-      return res.status(400).json({ error: "Invalid end_date format. Use YYYY-MM-DD." });
-    }
-    if (start_date && end_date && new Date(start_date) > new Date(end_date)) {
-      return res.status(400).json({ error: "start_date cannot be after end_date." });
-    }
-    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete", "All"];
-    if (status && !validStatuses.includes(status)) {
-      return res.status(400).json({ error: "Invalid status value." });
-    }
-
-    let conditions = [];
-    let params = [];
-    let paramIndex = 1;
-
-    if (start_date) {
-      conditions.push(`timestamp >= $${paramIndex}`);
-      params.push(start_date);
-      paramIndex++;
-    }
-    if (end_date) {
-      conditions.push(`timestamp <= $${paramIndex}::date + INTERVAL '1 day'`);
-      params.push(end_date);
-      paramIndex++;
-    }
-    if (status && status !== "All") {
-      conditions.push(`to_status = $${paramIndex}`);
-      params.push(status);
-      paramIndex++;
-    }
-
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const result = await pool.query(`
-      SELECT log_id, order_id, action, from_status, to_status, employee_name, timestamp, remarks
-      FROM audit_logs
-      ${whereClause}
-      ORDER BY timestamp DESC
-      LIMIT 100
-    `, params);
-
-    console.log("✅ Audit logs fetched:", result.rows.length);
+    console.log("🛠 Fetching audit logs");
+    const result = await pool.query("SELECT * FROM audit_logs ORDER BY timestamp DESC");
     res.json(result.rows);
   } catch (err) {
-    console.error("🚨 Error fetching audit logs:", err.stack);
-    res.status(500).json({ error: "Failed to fetch audit logs", details: err.message });
+    console.error("🚨 Error fetching audit logs:", err);
+    res.status(500).json({ error: "Failed to fetch audit logs" });
   }
 });
 
-const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
