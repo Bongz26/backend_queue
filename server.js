@@ -522,6 +522,233 @@ app.put("/api/orders/archive-old", async (req, res) => {
   }
 });
 
+// Fetch Order Report
+app.get("/api/orders/report", async (req, res) => {
+  try {
+    const { start_date, end_date, status, category, include_deleted } = req.query;
+    console.log("🛠 Generating order report with filters:", { start_date, end_date, status, category, include_deleted });
+
+    // Validate inputs
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+      return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
+    }
+    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      return res.status(400).json({ error: "Invalid end_date format. Use YYYY-MM-DD." });
+    }
+    if (start_date && end_date && new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({ error: "start_date cannot be after end_date." });
+    }
+    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete", "All"];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Invalid status value." });
+    }
+
+    // Build query for orders2
+    let queryConditions = [];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    queryConditions.push(`deleted = FALSE`);
+
+    if (start_date) {
+      queryConditions.push(`start_time >= $${paramIndex}`);
+      queryParams.push(start_date);
+      paramIndex++;
+    }
+    if (end_date) {
+      queryConditions.push(`start_time <= $${paramIndex}::date + INTERVAL '1 day'`);
+      queryParams.push(end_date);
+      paramIndex++;
+    }
+    if (status && status !== "All") {
+      queryConditions.push(`current_status = $${paramIndex}`);
+      queryParams.push(status);
+      paramIndex++;
+    }
+    if (category && category !== "All") {
+      queryConditions.push(`category = $${paramIndex}`);
+      queryParams.push(category);
+      paramIndex++;
+    }
+
+    const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(" AND ")}` : "";
+
+    // Status Summary
+    const statusResult = await pool.query(`
+      SELECT current_status, COUNT(*) as count
+      FROM orders2
+      ${whereClause}
+      GROUP BY current_status
+    `, queryParams);
+
+    // Category Summary
+    const categoryResult = await pool.query(`
+      SELECT category, COUNT(*) as count
+      FROM orders2
+      ${whereClause}
+      GROUP BY category
+    `, queryParams);
+
+    // History Summary (from audit_logs)
+    let historyConditions = [];
+    let historyParams = [];
+    let historyIndex = 1;
+
+    if (start_date) {
+      historyConditions.push(`timestamp >= $${historyIndex}`);
+      historyParams.push(start_date);
+      historyIndex++;
+    }
+    if (end_date) {
+      historyConditions.push(`timestamp <= $${historyIndex}::date + INTERVAL '1 day'`);
+      historyParams.push(end_date);
+      historyIndex++;
+    }
+    if (status && status !== "All") {
+      historyConditions.push(`to_status = $${historyIndex}`);
+      historyParams.push(status);
+      historyIndex++;
+    }
+
+    const historyWhereClause = historyConditions.length > 0 ? `WHERE ${historyConditions.join(" AND ")}` : "";
+
+    let historySummary = {};
+    try {
+      const historyResult = await pool.query(`
+        SELECT action, COUNT(*) as count
+        FROM audit_logs
+        ${historyWhereClause}
+        GROUP BY action
+      `, historyParams);
+      historySummary = historyResult.rows.reduce((acc, row) => {
+        acc[row.action] = parseInt(row.count, 10);
+        return acc;
+      }, {});
+    } catch (err) {
+      console.warn("⚠️ Audit logs query failed, returning empty history:", err.message);
+      historySummary = { "No audit data": 0 };
+    }
+
+    // Include deleted orders if requested
+    let deletedSummary = {};
+    if (include_deleted === "true") {
+      let deletedConditions = [];
+      let deletedParams = [];
+      let deletedIndex = 1;
+
+      if (start_date) {
+        deletedConditions.push(`start_time >= $${deletedIndex}`);
+        deletedParams.push(start_date);
+        deletedIndex++;
+      }
+      if (end_date) {
+        deletedConditions.push(`start_time <= $${deletedIndex}::date + INTERVAL '1 day'`);
+        deletedParams.push(end_date);
+        deletedIndex++;
+      }
+      if (status && status !== "All") {
+        deletedConditions.push(`current_status = $${deletedIndex}`);
+        deletedParams.push(status);
+        deletedIndex++;
+      }
+      if (category && category !== "All") {
+        deletedConditions.push(`category = $${deletedIndex}`);
+        deletedParams.push(category);
+        deletedIndex++;
+      }
+
+      const deletedWhereClause = deletedConditions.length > 0 ? `WHERE ${deletedConditions.join(" AND ")}` : "";
+
+      const deletedResult = await pool.query(`
+        SELECT current_status, COUNT(*) as count
+        FROM deleted_orders
+        ${deletedWhereClause}
+        GROUP BY current_status
+      `, deletedParams);
+
+      deletedSummary = deletedResult.rows.reduce((acc, row) => {
+        acc[row.current_status] = parseInt(row.count, 10);
+        return acc;
+      }, {});
+    }
+
+    const statusSummary = statusResult.rows.reduce((acc, row) => {
+      acc[row.current_status] = parseInt(row.count, 10);
+      return acc;
+    }, {});
+
+    const categorySummary = categoryResult.rows.reduce((acc, row) => {
+      acc[row.category] = parseInt(row.count, 10);
+      return acc;
+    }, {});
+
+    console.log("✅ Report generated:", { statusSummary, categorySummary, historySummary, deletedSummary });
+    res.json({ statusSummary, categorySummary, historySummary, deletedSummary });
+  } catch (err) {
+    console.error("🚨 Error generating report:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch Detailed Audit Logs
+app.get("/api/audit_logs", async (req, res) => {
+  try {
+    const { start_date, end_date, status } = req.query;
+    console.log("🛠 Fetching audit logs with filters:", { start_date, end_date, status });
+
+    // Validate inputs
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+      return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
+    }
+    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      return res.status(400).json({ error: "Invalid end_date format. Use YYYY-MM-DD." });
+    }
+    if (start_date && end_date && new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({ error: "start_date cannot be after end_date." });
+    }
+    const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete", "All"];
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({ error: "Invalid status value." });
+    }
+
+    let conditions = [];
+    let params = [];
+    let paramIndex = 1;
+
+    if (start_date) {
+      conditions.push(`timestamp >= $${paramIndex}`);
+      params.push(start_date);
+      paramIndex++;
+    }
+    if (end_date) {
+      conditions.push(`timestamp <= $${paramIndex}::date + INTERVAL '1 day'`);
+      params.push(end_date);
+      paramIndex++;
+    }
+    if (status && status !== "All") {
+      conditions.push(`to_status = $${paramIndex}`);
+      params.push(status);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await pool.query(
+      `SELECT log_id, order_id, action, from_status, to_status, employee_name, timestamp, remarks
+       FROM audit_logs
+       ${whereClause}
+       ORDER BY timestamp DESC
+       LIMIT 100`,
+      params
+    );
+
+    console.log("✅ Audit logs fetched:", result.rows.length);
+    res.json(result.rows);
+  } catch (err) {
+    console.error("🚨 Error fetching audit logs:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Health Check
 app.get("/", (req, res) => {
   res.send("🚀 Backend is alive!");
