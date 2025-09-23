@@ -520,21 +520,70 @@ app.put("/api/orders/archive-old", async (req, res) => {
 // Fetch Order Report
 app.get("/api/orders/report", async (req, res) => {
   try {
-    console.log("🛠 Generating order report...");
+    const { start_date, end_date, status } = req.query;
+    console.log("🛠 Generating order report with filters:", { start_date, end_date, status });
+
+    let queryConditions = [];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    queryConditions.push(`deleted = FALSE`);
+
+    if (start_date) {
+      queryConditions.push(`start_time >= $${paramIndex}`);
+      queryParams.push(start_date);
+      paramIndex++;
+    }
+    if (end_date) {
+      queryConditions.push(`start_time <= $${paramIndex}`);
+      queryParams.push(end_date);
+      paramIndex++;
+    }
+    if (status && status !== "All") {
+      queryConditions.push(`current_status = $${paramIndex}`);
+      queryParams.push(status);
+      paramIndex++;
+    }
+
+    const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(" AND ")}` : "";
 
     const statusResult = await pool.query(`
       SELECT current_status, COUNT(*) as count
       FROM orders2
-      WHERE deleted = FALSE
+      ${whereClause}
       GROUP BY current_status
-    `);
+    `, queryParams);
 
     const categoryResult = await pool.query(`
       SELECT category, COUNT(*) as count
       FROM orders2
-      WHERE deleted = FALSE
+      ${whereClause}
       GROUP BY category
-    `);
+    `, queryParams);
+
+    let historyConditions = [];
+    let historyParams = [];
+    let historyIndex = 1;
+
+    if (start_date) {
+      historyConditions.push(`entered_at >= $${historyIndex}`);
+      historyParams.push(start_date);
+      historyIndex++;
+    }
+    if (end_date) {
+      historyConditions.push(`entered_at <= $${historyIndex}`);
+      historyParams.push(end_date);
+      historyIndex++;
+    }
+
+    const historyWhereClause = historyConditions.length > 0 ? `WHERE ${historyConditions.join(" AND ")}` : "";
+
+    const historyResult = await pool.query(`
+      SELECT action, COUNT(*) as count
+      FROM audit_logs
+      ${historyWhereClause}
+      GROUP BY action
+    `, historyParams);
 
     const statusSummary = statusResult.rows.reduce((acc, row) => {
       acc[row.current_status] = parseInt(row.count, 10);
@@ -546,8 +595,13 @@ app.get("/api/orders/report", async (req, res) => {
       return acc;
     }, {});
 
-    console.log("✅ Report generated:", { statusSummary, categorySummary });
-    res.json({ statusSummary, categorySummary });
+    const historySummary = historyResult.rows.reduce((acc, row) => {
+      acc[row.action] = parseInt(row.count, 10);
+      return acc;
+    }, {});
+
+    console.log("✅ Report generated:", { statusSummary, categorySummary, historySummary });
+    res.json({ statusSummary, categorySummary, historySummary });
   } catch (err) {
     console.error("🚨 Error generating report:", err);
     res.status(500).json({ error: err.message });
