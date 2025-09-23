@@ -427,6 +427,16 @@ app.get("/api/orders/report", async (req, res) => {
       }, {});
     }
 
+    const statusSummary = statusResult.rows.reduce((acc, row) => {
+      acc[row.current_status] = parseInt(row.count, 10);
+      return acc;
+    }, {});
+
+    const categorySummary = categoryResult.rows.reduce((acc, row) => {
+      acc[row.category] = parseInt(row.count, 10);
+      return acc;
+    }, {});
+
     console.log("✅ Report generated:", { statusSummary, categorySummary, historySummary, deletedSummary });
     res.json({ statusSummary, categorySummary, historySummary, deletedSummary });
   } catch (err) {
