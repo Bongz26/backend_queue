@@ -31,44 +31,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// TypeScript Interfaces (included as provided, though unused in the backend logic)
-export interface Subject {
-  id: string;
-  name: string;
-  description: string;
-  grade_levels: number[];
-  created_at: string;
-}
-
-export interface Course {
-  id: string;
-  tutor_id: string;
-  subject_id: string;
-  title: string;
-  description: string;
-  grade_level: number;
-  price: number;
-  duration_weeks: number;
-  max_students: number;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-  subject?: Subject;
-  tutor?: {
-    first_name: string;
-    last_name: string;
-  };
-}
-
-export interface Enrollment {
-  id: string;
-  student_id: string;
-  course_id: string;
-  enrolled_at: string;
-  status: 'active' | 'completed' | 'cancelled';
-  course?: Course;
-}
-
 // Search Orders (Updated)
 app.get("/api/orders/search", async (req, res) => {
   const { q, sortBy = 'transaction_id', sortOrder = 'DESC', limit = 50 } = req.query;
@@ -77,6 +39,7 @@ app.get("/api/orders/search", async (req, res) => {
   const validSortColumns = [
     'transaction_id',
     'customer_name',
+    'client_contact',
     'current_status',
     'start_time',
     'paint_type',
@@ -102,14 +65,12 @@ app.get("/api/orders/search", async (req, res) => {
     if (q && q.trim() !== '') {
       const searchTerm = `%${q.trim()}%`;
       queryConditions.push(`
-        (customer_name ILIKE $${paramIndex}
-        OR transaction_id ILIKE $${paramIndex + 1}
-        OR client_contact ILIKE $${paramIndex + 2}
-        OR paint_type ILIKE $${paramIndex + 3}
-        OR category ILIKE $${paramIndex + 4})
+        (transaction_id ILIKE $${paramIndex}
+        OR customer_name ILIKE $${paramIndex + 1}
+        OR client_contact ILIKE $${paramIndex + 2})
       `);
-      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
-      paramIndex += 5;
+      queryParams.push(searchTerm, searchTerm, searchTerm);
+      paramIndex += 3;
     }
 
     const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
