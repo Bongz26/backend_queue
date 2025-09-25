@@ -31,18 +31,101 @@ app.use((req, res, next) => {
   next();
 });
 
-// Search Orders
+// TypeScript Interfaces (included as provided, though unused in the backend logic)
+export interface Subject {
+  id: string;
+  name: string;
+  description: string;
+  grade_levels: number[];
+  created_at: string;
+}
+
+export interface Course {
+  id: string;
+  tutor_id: string;
+  subject_id: string;
+  title: string;
+  description: string;
+  grade_level: number;
+  price: number;
+  duration_weeks: number;
+  max_students: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  subject?: Subject;
+  tutor?: {
+    first_name: string;
+    last_name: string;
+  };
+}
+
+export interface Enrollment {
+  id: string;
+  student_id: string;
+  course_id: string;
+  enrolled_at: string;
+  status: 'active' | 'completed' | 'cancelled';
+  course?: Course;
+}
+
+// Search Orders (Updated)
 app.get("/api/orders/search", async (req, res) => {
-  const { q } = req.query;
+  const { q, sortBy = 'transaction_id', sortOrder = 'DESC', limit = 50 } = req.query;
+
+  // Validate sortBy to prevent SQL injection
+  const validSortColumns = [
+    'transaction_id',
+    'customer_name',
+    'current_status',
+    'start_time',
+    'paint_type',
+    'category',
+    'po_type'
+  ];
+  const column = validSortColumns.includes(sortBy) ? sortBy : 'transaction_id';
+
+  // Validate sortOrder
+  const order = sortOrder.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+
+  // Validate limit
+  const resultLimit = parseInt(limit, 10) > 0 ? parseInt(limit, 10) : 50;
+
   try {
-    console.log("🔍 Searching orders with query:", q);
-    const result = await pool.query(`
+    console.log("🔍 Searching orders with query:", { q, sortBy: column, sortOrder: order, limit: resultLimit });
+
+    // Build the WHERE clause for search
+    let queryConditions = ['deleted = FALSE']; // Exclude deleted orders
+    let queryParams = [];
+    let paramIndex = 1;
+
+    if (q && q.trim() !== '') {
+      const searchTerm = `%${q.trim()}%`;
+      queryConditions.push(`
+        (customer_name ILIKE $${paramIndex}
+        OR transaction_id ILIKE $${paramIndex + 1}
+        OR client_contact ILIKE $${paramIndex + 2}
+        OR paint_type ILIKE $${paramIndex + 3}
+        OR category ILIKE $${paramIndex + 4})
+      `);
+      queryParams.push(searchTerm, searchTerm, searchTerm, searchTerm, searchTerm);
+      paramIndex += 5;
+    }
+
+    const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(' AND ')}` : '';
+
+    const query = `
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time,
              paint_quantity, order_type, category, note, po_type
       FROM orders2
-      ORDER BY 1 DESC
-    `); // Updated: Added po_type to SELECT
+      ${whereClause}
+      ORDER BY ${column} ${order}
+      LIMIT $${paramIndex}
+    `;
+    queryParams.push(resultLimit);
+
+    const result = await pool.query(query, queryParams);
     console.log("✅ Search returned:", result.rows.length, "orders");
     res.json(result.rows);
   } catch (err) {
@@ -93,7 +176,7 @@ app.get("/api/orders", async (req, res) => {
       AND o.deleted = FALSE
       ORDER BY o.current_status DESC
       LIMIT 20
-    `); // Updated: Added po_type to SELECT
+    `);
     console.log("✅ Active orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
@@ -112,7 +195,7 @@ app.get("/api/orders/active", async (req, res) => {
               paint_quantity, order_type, category, note, po_type
        FROM orders2 
        WHERE current_status IN ('Mixing', 'Waiting', 'Pending')`
-    ); // Updated: Added po_type to SELECT
+    );
     console.log("✅ Active orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (error) {
@@ -132,7 +215,7 @@ app.get("/api/orders/archived", async (req, res) => {
       FROM orders2
       WHERE archived = TRUE
       ORDER BY start_time DESC
-    `); // Updated: Added po_type to SELECT
+    `);
     console.log("✅ Archived orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
@@ -151,7 +234,7 @@ app.get("/api/orders/deleted", async (req, res) => {
              paint_quantity, order_type, category, note, po_type
       FROM deleted_orders
       ORDER BY start_time DESC
-    `); // Updated: Added po_type to SELECT
+    `);
     console.log("✅ Deleted orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (err) {
@@ -173,7 +256,7 @@ app.post("/api/orders", async (req, res) => {
       paint_quantity,
       current_status,
       order_type,
-      po_type, // New: Destructure po_type
+      po_type,
       note
     } = req.body;
 
@@ -183,7 +266,6 @@ app.post("/api/orders", async (req, res) => {
     if (!colour_code || colour_code.trim() === "") {
       colour_code = "N/A";
     }
-    // New: Validate po_type for Paid orders
     if (order_type === "Paid" && !["Nexa", "Carvello"].includes(po_type)) {
       return res.status(400).json({ error: "❌ PO Type must be 'Nexa' or 'Carvello' for Paid orders" });
     }
@@ -200,7 +282,7 @@ app.post("/api/orders", async (req, res) => {
       [
         transaction_id, customer_name, client_contact, paint_type,
         colour_code, category, paint_quantity, current_status,
-        order_type, start_time, note || null, po_type || null // New: Include po_type
+        order_type, start_time, note || null, po_type || null
       ]
     );
 
@@ -218,7 +300,7 @@ app.post("/api/orders", async (req, res) => {
 // Update Order Status
 app.put("/api/orders/:id", async (req, res) => {
   try {
-    let { current_status, assigned_employee, colour_code, note, old_status, userRole, po_type } = req.body; // New: Destructure po_type
+    let { current_status, assigned_employee, colour_code, note, old_status, userRole, po_type } = req.body;
     const { id } = req.params;
 
     const validStatuses = ["Waiting", "Mixing", "Spraying", "Re-Mixing", "Ready", "Complete"];
@@ -234,11 +316,10 @@ app.put("/api/orders/:id", async (req, res) => {
       return res.status(400).json({ error: "❌ Employee must be assigned when updating order status!" });
     }
 
-    // Fetch current order to check if status changed
     const currentOrder = await pool.query(
       "SELECT current_status, note, po_type FROM orders2 WHERE transaction_id = $1",
       [id]
-    ); // Updated: Added po_type to SELECT
+    );
     if (currentOrder.rows.length === 0) {
       return res.status(404).json({ error: "Order not found" });
     }
@@ -246,15 +327,13 @@ app.put("/api/orders/:id", async (req, res) => {
 
     console.log("🛠 Updating order:", { id, current_status, assigned_employee, colour_code, note, po_type });
 
-    // Update orders2
     await pool.query(
       `UPDATE orders2
        SET current_status = $1, colour_code = $2, assigned_employee = $3, note = $4, po_type = $5
        WHERE transaction_id = $6`,
-      [current_status, colour_code || "Pending", assigned_employee, note || null, po_type || existingPoType || null, id] // New: Include po_type
+      [current_status, colour_code || "Pending", assigned_employee, note || null, po_type || existingPoType || null, id]
     );
 
-    // Only insert into order_status_history if status changed
     if (current_status !== existingStatus) {
       await pool.query(
         `INSERT INTO order_status_history (transaction_id, status)
@@ -263,7 +342,6 @@ app.put("/api/orders/:id", async (req, res) => {
       );
     }
 
-    // Log to audit_logs
     const action = current_status !== existingStatus ? "Status Changed" : "Note Updated";
     const remarks = note && note !== existingNote ? `Note updated to: ${note}` : 
                     current_status !== existingStatus ? `Status updated${note ? ` with note: ${note}` : ""}` : 
@@ -311,7 +389,7 @@ app.delete("/api/orders/:id", async (req, res) => {
     const check = await pool.query(
       "SELECT current_status, po_type FROM orders2 WHERE transaction_id = $1 AND deleted = FALSE",
       [id]
-    ); // Updated: Added po_type to SELECT
+    );
     if (check.rows.length === 0) {
       console.warn(`❌ Order not found: ${id}`);
       return res.status(404).json({ error: "Order not found" });
@@ -338,7 +416,7 @@ app.delete("/api/orders/:id", async (req, res) => {
       FROM orders2
       WHERE transaction_id = $1`,
       [id, note]
-    ); // Updated: Added po_type to INSERT and SELECT
+    );
 
     await pool.query(
       `UPDATE orders2 SET deleted = TRUE WHERE transaction_id = $1`,
@@ -463,7 +541,7 @@ app.get("/api/orders/admin", async (req, res) => {
       FROM orders2
       WHERE current_status = 'Ready' AND order_type IN ('Order', 'Paid')
       ORDER BY start_time DESC
-    `); // Updated: Added po_type to SELECT
+    `);
     console.log("✅ Ready orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (error) {
@@ -528,7 +606,6 @@ app.get("/api/orders/report", async (req, res) => {
     const { start_date, end_date, status, category, include_deleted } = req.query;
     console.log("🛠 Generating order report with filters:", { start_date, end_date, status, category, include_deleted });
 
-    // Validate inputs
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
       return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
     }
@@ -543,7 +620,6 @@ app.get("/api/orders/report", async (req, res) => {
       return res.status(400).json({ error: "Invalid status value." });
     }
 
-    // Build query for orders2
     let queryConditions = [];
     let queryParams = [];
     let paramIndex = 1;
@@ -573,7 +649,6 @@ app.get("/api/orders/report", async (req, res) => {
 
     const whereClause = queryConditions.length > 0 ? `WHERE ${queryConditions.join(" AND ")}` : "";
 
-    // Status Summary
     const statusResult = await pool.query(`
       SELECT current_status, COUNT(*) as count
       FROM orders2
@@ -581,7 +656,6 @@ app.get("/api/orders/report", async (req, res) => {
       GROUP BY current_status
     `, queryParams);
 
-    // Category Summary
     const categoryResult = await pool.query(`
       SELECT category, COUNT(*) as count
       FROM orders2
@@ -589,7 +663,6 @@ app.get("/api/orders/report", async (req, res) => {
       GROUP BY category
     `, queryParams);
 
-    // History Summary (from audit_logs)
     let historyConditions = [];
     let historyParams = [];
     let historyIndex = 1;
@@ -629,7 +702,6 @@ app.get("/api/orders/report", async (req, res) => {
       historySummary = { "No audit data": 0 };
     }
 
-    // Include deleted orders if requested
     let deletedSummary = {};
     if (include_deleted === "true") {
       let deletedConditions = [];
@@ -696,7 +768,6 @@ app.get("/api/audit_logs", async (req, res) => {
     const { start_date, end_date, status } = req.query;
     console.log("🛠 Fetching audit logs with filters:", { start_date, end_date, status });
 
-    // Validate inputs
     if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
       return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
     }
