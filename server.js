@@ -165,7 +165,7 @@ app.get("/api/orders/active", async (req, res) => {
   }
 });
 
-// Fetch Complete Orders (REPLACE the duplicate endpoint with this)
+// Fetch Complete Orders (FIXED - with date range support)
 app.get("/api/orders/complete", async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
@@ -214,6 +214,8 @@ app.get("/api/orders/complete", async (req, res) => {
   } catch (error) {
     console.error("🚨 Error fetching complete orders:", error);
     res.status(500).json({ error: error.message });
+  }
+});
 
 // Fetch Archived Orders
 app.get("/api/orders/archived", async (req, res) => {
@@ -253,7 +255,6 @@ app.get("/api/orders/deleted", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 
 // Update Order Details (Full Edit) - New endpoint
 app.put("/api/orders/edit/:id", async (req, res) => {
@@ -301,6 +302,7 @@ app.put("/api/orders/edit/:id", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
 // Add New Order
 app.post("/api/orders", async (req, res) => {
   try {
