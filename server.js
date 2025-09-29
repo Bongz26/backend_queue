@@ -165,25 +165,55 @@ app.get("/api/orders/active", async (req, res) => {
   }
 });
 
-// Fetch Complete Orders
+// Fetch Complete Orders (REPLACE the duplicate endpoint with this)
 app.get("/api/orders/complete", async (req, res) => {
   try {
-    console.log("🛠 Fetching complete orders...");
+    const { start_date, end_date } = req.query;
+    console.log("🛠 Fetching complete orders with filters:", { start_date, end_date });
+
+    // Validate date formats
+    if (start_date && !/^\d{4}-\d{2}-\d{2}$/.test(start_date)) {
+      return res.status(400).json({ error: "Invalid start_date format. Use YYYY-MM-DD." });
+    }
+    if (end_date && !/^\d{4}-\d{2}-\d{2}$/.test(end_date)) {
+      return res.status(400).json({ error: "Invalid end_date format. Use YYYY-MM-DD." });
+    }
+    if (start_date && end_date && new Date(start_date) > new Date(end_date)) {
+      return res.status(400).json({ error: "start_date cannot be after end_date." });
+    }
+
+    // Build query conditions
+    let queryConditions = ["current_status = 'Complete'"];
+    let queryParams = [];
+    let paramIndex = 1;
+
+    if (start_date) {
+      queryConditions.push(`start_time >= $${paramIndex}`);
+      queryParams.push(start_date);
+      paramIndex++;
+    }
+    if (end_date) {
+      queryConditions.push(`start_time <= $${paramIndex}::date + INTERVAL '1 day'`);
+      queryParams.push(end_date);
+      paramIndex++;
+    }
+
+    const whereClause = `WHERE ${queryConditions.join(' AND ')}`;
+
     const result = await pool.query(`
       SELECT transaction_id, customer_name, client_contact, assigned_employee,
              current_status, colour_code, paint_type, start_time, paint_quantity, 
              order_type, category, note, po_type, completed_at
       FROM orders2
-      WHERE current_status = 'Complete'
+      ${whereClause}
       ORDER BY start_time DESC
-    `);
+    `, queryParams);
+
     console.log("✅ Complete orders fetched:", result.rows.length);
     res.json(result.rows);
   } catch (error) {
     console.error("🚨 Error fetching complete orders:", error);
     res.status(500).json({ error: error.message });
-  }
-});
 
 // Fetch Archived Orders
 app.get("/api/orders/archived", async (req, res) => {
@@ -224,25 +254,7 @@ app.get("/api/orders/deleted", async (req, res) => {
   }
 });
 
-//// Fetch Complete Orders
-app.get("/api/orders/complete", async (req, res) => {
-  try {
-    console.log("🛠 Fetching complete orders...");
-    const result = await pool.query(`
-      SELECT transaction_id, customer_name, client_contact, assigned_employee,
-             current_status, colour_code, paint_type, start_time, paint_quantity, 
-             order_type, category, note, po_type, completed_at
-      FROM orders2
-      WHERE current_status = 'Complete'
-      ORDER BY start_time DESC
-    `);
-    console.log("✅ Complete orders fetched:", result.rows.length);
-    res.json(result.rows);
-  } catch (error) {
-    console.error("🚨 Error fetching complete orders:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
+
 // Update Order Details (Full Edit) - New endpoint
 app.put("/api/orders/edit/:id", async (req, res) => {
   try {
