@@ -204,6 +204,26 @@ app.get("/api/orders/deleted", async (req, res) => {
   }
 });
 
+//// Fetch Complete Orders
+app.get("/api/orders/complete", async (req, res) => {
+  try {
+    console.log("🛠 Fetching complete orders...");
+    const result = await pool.query(`
+      SELECT transaction_id, customer_name, client_contact, assigned_employee,
+             current_status, colour_code, paint_type, start_time, paint_quantity, 
+             order_type, category, note, po_type, completed_at
+      FROM orders2
+      WHERE current_status = 'Complete'
+      ORDER BY start_time DESC
+    `);
+    console.log("✅ Complete orders fetched:", result.rows.length);
+    res.json(result.rows);
+  } catch (error) {
+    console.error("🚨 Error fetching complete orders:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Add New Order
 app.post("/api/orders", async (req, res) => {
   try {
