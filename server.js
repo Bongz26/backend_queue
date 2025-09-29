@@ -223,7 +223,52 @@ app.get("/api/orders/complete", async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+// Update Order Details (Full Edit) - New endpoint
+app.put("/api/orders/edit/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { 
+      customer_name, 
+      client_contact, 
+      paint_type, 
+      paint_quantity, 
+      category, 
+      po_type, 
+      colour_code, 
+      note, 
+      userRole 
+    } = req.body;
 
+    if (userRole !== "Admin") {
+      return res.status(403).json({ error: "Only Admins can edit order details" });
+    }
+
+    console.log("🛠 Editing order details:", { id, customer_name, client_contact, paint_type });
+
+    await pool.query(
+      `UPDATE orders2
+       SET customer_name = $1, client_contact = $2, paint_type = $3, 
+           paint_quantity = $4, category = $5, po_type = $6, 
+           colour_code = $7, note = $8
+       WHERE transaction_id = $9`,
+      [customer_name, client_contact, paint_type, paint_quantity, 
+       category, po_type || null, colour_code || "Pending", note || null, id]
+    );
+
+    await pool.query(
+      `INSERT INTO audit_logs
+       (order_id, action, from_status, to_status, employee_name, user_role, remarks)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [id, "Order Details Updated", "N/A", "N/A", null, userRole, "Order details edited via admin panel"]
+    );
+
+    console.log(`✅ Order details updated successfully: ${id}`);
+    res.json({ message: "✅ Order details updated successfully" });
+  } catch (error) {
+    console.error("🚨 Error updating order details:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
 // Add New Order
 app.post("/api/orders", async (req, res) => {
   try {
